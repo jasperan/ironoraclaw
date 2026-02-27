@@ -1,0 +1,74 @@
+# IronOraClaw Docker Compose
+#
+# Default backend: Oracle AI Database 26ai Free container
+# For managed cloud deployment, use the "Deploy to Oracle Cloud" button in README.
+#
+# Quick start:
+#   1. Copy .env.example to .env and configure
+#   2. Run: docker compose up -d
+#   3. Wait for Oracle AI Database 26ai Free to become healthy (~2 minutes)
+#
+# For more info: https://github.com/jasperan/ironoraclaw
+
+services:
+  oracle-db:
+    # Oracle AI Database 26ai Free — the exclusive storage backend
+    image: container-registry.oracle.com/database/free:latest-lite
+    container_name: ironoraclaw-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PWD: ${ORACLE_PWD:-IronOraClaw2026}
+      ORACLE_CHARACTERSET: AL32UTF8
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s sys/$${ORACLE_PWD}@localhost:1521/FREEPDB1 as sysdba || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  ironoraclaw:
+    build: .
+    container_name: ironoraclaw
+    restart: unless-stopped
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+    environment:
+      - DATABASE_BACKEND=oracle
+      - IRONORACLAW_ORACLE_HOST=oracle-db
+      - IRONORACLAW_ORACLE_PORT=1521
+      - IRONORACLAW_ORACLE_SERVICE=FREEPDB1
+      - IRONORACLAW_ORACLE_USER=ironoraclaw
+      - IRONORACLAW_ORACLE_PASSWORD=${ORACLE_PWD:-IronOraClaw2026}
+      - LLM_BACKEND=${LLM_BACKEND:-ollama}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - IRONCLAW_ALLOW_PUBLIC_BIND=true
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ironoraclaw-data:/ironoraclaw-data
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  oracle-data:
+  ironoraclaw-data:
