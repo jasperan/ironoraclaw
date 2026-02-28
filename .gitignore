@@ -28,3 +28,7 @@ bench-results/
 
 # IronOraClaw
 docs/plans/
+
+# Python bytecode
+__pycache__/
+*.pyc
