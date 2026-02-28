@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/Rust-1.92+-DEA584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust 1.92+" />
   <img src="https://img.shields.io/badge/Oracle_AI_Database-26ai_Free-F80000?style=for-the-badge&logo=oracle&logoColor=white" alt="Oracle AI Database 26ai Free" />
   <img src="https://img.shields.io/badge/backend-Ollama-black?style=for-the-badge" alt="Ollama" />
+  <a href="https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm"><img src="https://img.shields.io/badge/OCI-GenAI-F80000.svg?style=for-the-badge&logo=oracle&logoColor=white" alt="OCI GenAI" /></a>
   <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache%202.0-blue.svg?style=for-the-badge" alt="License: MIT OR Apache-2.0" /></a>
 </p>
 
@@ -114,6 +115,58 @@ docker compose up oracle-db -d
 ```
 
 The Oracle AI Database 26ai Free container takes approximately 2 minutes to initialize on first start. The `ironoraclaw` service will wait for it to become healthy before starting.
+
+## OCI Generative AI (Optional)
+
+IronOraClaw can optionally use **OCI Generative AI** as an LLM backend via the `oci-openai` Python library. This is **not required** -- Ollama remains the default and recommended LLM backend.
+
+### Why OCI GenAI?
+
+- **Enterprise models** -- Access xAI Grok, Meta Llama, Cohere, and other models through OCI
+- **OCI-native auth** -- Uses your existing `~/.oci/config` profile (no separate API keys)
+- **Same region as your database** -- Run inference and storage in the same OCI region
+
+### Setup
+
+1. **Install the OCI GenAI proxy:**
+   ```bash
+   cd oci-genai
+   pip install -r requirements.txt
+   ```
+
+2. **Configure OCI credentials** (`~/.oci/config`):
+   ```ini
+   [DEFAULT]
+   user=ocid1.user.oc1..aaaaaaaaexample
+   fingerprint=aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99
+   tenancy=ocid1.tenancy.oc1..aaaaaaaaexample
+   region=us-chicago-1
+   key_file=~/.oci/oci_api_key.pem
+   ```
+
+3. **Set environment variables:**
+   ```bash
+   export OCI_PROFILE=DEFAULT
+   export OCI_REGION=us-chicago-1
+   export OCI_COMPARTMENT_ID=ocid1.compartment.oc1..your-compartment-ocid
+   ```
+
+4. **Start the OCI GenAI proxy:**
+   ```bash
+   cd oci-genai
+   python proxy.py
+   # Proxy runs at http://localhost:9999/v1
+   ```
+
+5. **Configure IronOraClaw** (`.env` or environment):
+   ```bash
+   LLM_BACKEND=openai_compatible
+   LLM_BASE_URL=http://localhost:9999/v1
+   LLM_API_KEY=oci-genai
+   LLM_MODEL=meta.llama-3.3-70b-instruct
+   ```
+
+See [`oci-genai/README.md`](oci-genai/README.md) for full documentation.
 
 ## Oracle Schema
 
