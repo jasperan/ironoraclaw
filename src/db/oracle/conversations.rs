@@ -184,7 +184,7 @@ impl ConversationStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut results = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let started_at_str: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -237,7 +237,7 @@ impl ConversationStore for OracleBackend {
                        FETCH FIRST 1 ROW ONLY";
             let rows = conn.query(sql, &[&user_id, &channel])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return id_str.parse()
@@ -323,7 +323,7 @@ impl ConversationStore for OracleBackend {
             };
 
             let mut all = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let role: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -366,7 +366,7 @@ impl ConversationStore for OracleBackend {
             let rows = conn.query(sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut current: serde_json::Value = serde_json::json!({});
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let meta_str: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 if let Some(s) = meta_str {
@@ -402,7 +402,7 @@ impl ConversationStore for OracleBackend {
             let sql = "SELECT metadata FROM IRON_CONVERSATIONS WHERE id = :1";
             let rows = conn.query(sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let meta_str: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let val = meta_str
@@ -434,7 +434,7 @@ impl ConversationStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut messages = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let role: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -468,7 +468,7 @@ impl ConversationStore for OracleBackend {
             let sql = "SELECT COUNT(*) FROM IRON_CONVERSATIONS WHERE id = :1 AND user_id = :2";
             let rows = conn.query(sql, &[&cid, &user_id])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(count > 0);

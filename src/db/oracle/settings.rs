@@ -49,7 +49,7 @@ impl SettingsStore for OracleBackend {
                 )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let value_str: String = row.get(0).unwrap_or_default();
                 let value: serde_json::Value =
@@ -82,7 +82,7 @@ impl SettingsStore for OracleBackend {
                 )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let key: String = row.get(0).unwrap_or_default();
                 let value_str: String = row.get(1).unwrap_or_default();
@@ -174,7 +174,7 @@ impl SettingsStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut settings = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let key: String = row.get(0).unwrap_or_default();
                 let value_str: String = row.get(1).unwrap_or_default();
@@ -210,7 +210,7 @@ impl SettingsStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut map = HashMap::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let key: String = row.get(0).unwrap_or_default();
                 let value_str: String = row.get(1).unwrap_or_default();
@@ -279,7 +279,7 @@ impl SettingsStore for OracleBackend {
                 )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(0).unwrap_or(0);
                 return Ok(count > 0);

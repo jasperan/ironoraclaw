@@ -253,7 +253,7 @@ impl RoutineStore for OracleBackend {
                 .query(&sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(Some(row_to_routine(&row)?));
             }
@@ -283,7 +283,7 @@ impl RoutineStore for OracleBackend {
                 .query(&sql, &[&user_id, &name])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(Some(row_to_routine(&row)?));
             }
@@ -309,7 +309,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -334,7 +334,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -359,7 +359,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -602,7 +602,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut runs = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 runs.push(row_to_routine_run(&row)?);
             }
@@ -626,7 +626,7 @@ impl RoutineStore for OracleBackend {
                 )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(0).unwrap_or(0);
                 return Ok(count);

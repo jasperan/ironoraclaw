@@ -141,7 +141,7 @@ impl JobStore for OracleBackend {
             let rows = conn.query(sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let status_str: String = row.get(5).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let est_time: Option<i64> = row.get(11).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -245,7 +245,7 @@ impl JobStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut ids = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 if let Ok(id) = id_str.parse() {
@@ -321,7 +321,7 @@ impl JobStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut actions = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let warnings_str: String = row.get::<usize, Option<String>>(6)
                     .map_err(|e| DatabaseError::Query(e.to_string()))?

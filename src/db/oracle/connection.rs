@@ -92,6 +92,6 @@ impl OracleConnectionManager {
     pub fn ping(&self) -> bool {
         self.conn
             .lock()
-            .map_or(false, |conn| conn.ping().is_ok())
+            .is_ok_and(|conn| conn.ping().is_ok())
     }
 }

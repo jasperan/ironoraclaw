@@ -129,7 +129,7 @@ impl SandboxStore for OracleBackend {
             let sql = format!("{} WHERE id = :1", SANDBOX_SELECT);
             let rows = conn.query(&sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(Some(row_to_sandbox_job(&row)?));
             }
@@ -149,7 +149,7 @@ impl SandboxStore for OracleBackend {
             let rows = conn.query(&sql, &[])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut jobs = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 jobs.push(row_to_sandbox_job(&row)?);
             }
@@ -244,7 +244,7 @@ impl SandboxStore for OracleBackend {
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut summary = SandboxJobSummary::default();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let status: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -279,7 +279,7 @@ impl SandboxStore for OracleBackend {
             let rows = conn.query(&sql, &[&user_id])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut jobs = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 jobs.push(row_to_sandbox_job(&row)?);
             }
@@ -306,7 +306,7 @@ impl SandboxStore for OracleBackend {
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut summary = SandboxJobSummary::default();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let status: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -344,7 +344,7 @@ impl SandboxStore for OracleBackend {
                 &[&id_str, &user_id],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count: i64 = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(count > 0);
@@ -387,7 +387,7 @@ impl SandboxStore for OracleBackend {
                 &[&id_str],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let mode: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(mode);
@@ -454,7 +454,7 @@ impl SandboxStore for OracleBackend {
             };
 
             let mut events = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let data_str: Option<String> = row.get(3).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let ts_str: String = row.get(4).map_err(|e| DatabaseError::Query(e.to_string()))?;

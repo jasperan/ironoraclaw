@@ -121,7 +121,7 @@ impl WorkspaceStore for OracleBackend {
             };
 
             let _ = sql; // suppress unused warning
-            for row_result in result {
+            if let Some(row_result) = result.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
                 })?;
@@ -157,7 +157,7 @@ impl WorkspaceStore for OracleBackend {
                 }
             })?;
 
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
                 })?;
@@ -409,10 +409,10 @@ impl WorkspaceStore for OracleBackend {
                             e.is_directory = true;
                             e.content_preview = None;
                         }
-                        if let (Some(existing), Some(new)) = (&e.updated_at, &updated_at) {
-                            if new > existing {
-                                e.updated_at = Some(*new);
-                            }
+                        if let (Some(existing), Some(new)) = (&e.updated_at, &updated_at)
+                            && new > existing
+                        {
+                            e.updated_at = Some(*new);
                         }
                     })
                     .or_insert(WorkspaceEntry {
@@ -467,7 +467,7 @@ impl WorkspaceStore for OracleBackend {
             };
 
             let mut paths = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
                 })?;
@@ -522,7 +522,7 @@ impl WorkspaceStore for OracleBackend {
             };
 
             let mut docs = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
                 })?;
@@ -710,7 +710,7 @@ impl WorkspaceStore for OracleBackend {
             };
 
             let mut chunks = Vec::new();
-            for row_result in rows {
+            if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
                 })?;
@@ -797,7 +797,7 @@ impl WorkspaceStore for OracleBackend {
                 };
 
                 let mut results = Vec::new();
-                for row_result in rows {
+                if let Some(row_result) = rows.into_iter().next() {
                     let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                         reason: format!("FTS row error: {e}"),
                     })?;
@@ -858,7 +858,7 @@ impl WorkspaceStore for OracleBackend {
                     };
 
                     let mut results = Vec::new();
-                    for row_result in rows {
+                    if let Some(row_result) = rows.into_iter().next() {
                         let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                             reason: format!("Vector row error: {e}"),
                         })?;
