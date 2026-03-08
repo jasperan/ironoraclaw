@@ -766,7 +766,17 @@ impl WorkspaceStore for OracleBackend {
                 // Use a simple LIKE-based text search as fallback.
                 // Oracle Text (CONTAINS) requires a domain index which may not be set up.
                 // The LIKE approach is simpler and always works.
-                let like_pattern = format!("%{}%", query);
+                // Escape LIKE wildcards in user input to prevent unintended matching
+                let escaped_query: String = query
+                    .chars()
+                    .flat_map(|c| match c {
+                        '\\' => vec!['\\', '\\'],
+                        '%' => vec!['\\', '%'],
+                        '_' => vec!['\\', '_'],
+                        other => vec![other],
+                    })
+                    .collect();
+                let like_pattern = format!("%{escaped_query}%");
 
                 let rows = if let Some(ref aid) = agent_id_str {
                     conn.query(
@@ -774,7 +784,7 @@ impl WorkspaceStore for OracleBackend {
                          FROM IRON_CHUNKS c
                          JOIN IRON_MEMORIES d ON d.id = c.document_id
                          WHERE d.user_id = :1 AND d.agent_id = :2
-                           AND LOWER(c.content) LIKE LOWER(:3)
+                           AND LOWER(c.content) LIKE LOWER(:3) ESCAPE '\\'
                          FETCH FIRST :4 ROWS ONLY",
                         &[&user_id, aid, &like_pattern, &pre_limit],
                     )
@@ -787,7 +797,7 @@ impl WorkspaceStore for OracleBackend {
                          FROM IRON_CHUNKS c
                          JOIN IRON_MEMORIES d ON d.id = c.document_id
                          WHERE d.user_id = :1 AND d.agent_id IS NULL
-                           AND LOWER(c.content) LIKE LOWER(:2)
+                           AND LOWER(c.content) LIKE LOWER(:2) ESCAPE '\\'
                          FETCH FIRST :3 ROWS ONLY",
                         &[&user_id, &like_pattern, &pre_limit],
                     )
