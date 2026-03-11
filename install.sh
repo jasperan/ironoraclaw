@@ -3,10 +3,13 @@ set -euo pipefail
 
 # ============================================================
 # ironoraclaw — One-Command Installer
-# ---
+# IronOraClaw is a fork of IronClaw that replaces ALL storage backends with Oracle AI Database as the
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/jasperan/ironoraclaw/main/install.sh | bash
+#
+# Override install location:
+#   PROJECT_DIR=/opt/myapp curl -fsSL ... | bash
 # ============================================================
 
 REPO_URL="https://github.com/jasperan/ironoraclaw.git"
@@ -33,7 +36,7 @@ print_banner() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}  ironoraclaw${NC}"
-    echo -e "  ---"
+    echo -e "  IronOraClaw is a fork of IronClaw that replaces ALL storage backends with Oracle AI Database as the"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 }
@@ -65,7 +68,7 @@ install_deps() {
     cargo build --release
     success "Build complete"
 
-    BIN_NAME=$(ls target/release/ 2>/dev/null | grep -v -E '\.(d|o|rlib|rmeta)$' | head -1)
+    BIN_NAME=$(find target/release -maxdepth 1 -type f -executable ! -name '*.d' 2>/dev/null | head -1 | xargs -r basename)
     if [ -n "$BIN_NAME" ]; then
         LOCAL_BIN="${HOME}/.local/bin"
         mkdir -p "$LOCAL_BIN"
