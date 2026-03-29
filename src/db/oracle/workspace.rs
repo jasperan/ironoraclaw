@@ -147,15 +147,12 @@ impl WorkspaceStore for OracleBackend {
             let conn = conn.lock().map_err(|e| WorkspaceError::SearchFailed {
                 reason: format!("Lock error: {e}"),
             })?;
-            let sql = format!(
-                "SELECT {} FROM IRON_MEMORIES WHERE id = :1",
-                DOC_COLUMNS
-            );
-            let rows = conn.query(&sql, &[&id_str]).map_err(|e| {
-                WorkspaceError::SearchFailed {
+            let sql = format!("SELECT {} FROM IRON_MEMORIES WHERE id = :1", DOC_COLUMNS);
+            let rows = conn
+                .query(&sql, &[&id_str])
+                .map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Query failed: {e}"),
-                }
-            })?;
+                })?;
 
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
@@ -545,13 +542,10 @@ impl WorkspaceStore for OracleBackend {
             let conn = conn.lock().map_err(|e| WorkspaceError::ChunkingFailed {
                 reason: format!("Lock error: {e}"),
             })?;
-            conn.execute(
-                "DELETE FROM IRON_CHUNKS WHERE document_id = :1",
-                &[&doc_id],
-            )
-            .map_err(|e| WorkspaceError::ChunkingFailed {
-                reason: format!("Delete failed: {e}"),
-            })?;
+            conn.execute("DELETE FROM IRON_CHUNKS WHERE document_id = :1", &[&doc_id])
+                .map_err(|e| WorkspaceError::ChunkingFailed {
+                    reason: format!("Delete failed: {e}"),
+                })?;
             conn.commit().map_err(|e| WorkspaceError::ChunkingFailed {
                 reason: format!("Commit failed: {e}"),
             })?;
@@ -780,7 +774,7 @@ impl WorkspaceStore for OracleBackend {
 
                 let rows = if let Some(ref aid) = agent_id_str {
                     conn.query(
-                        "SELECT c.id, c.document_id, c.content
+                        "SELECT c.id, c.document_id, d.path, c.content
                          FROM IRON_CHUNKS c
                          JOIN IRON_MEMORIES d ON d.id = c.document_id
                          WHERE d.user_id = :1 AND d.agent_id = :2
@@ -793,7 +787,7 @@ impl WorkspaceStore for OracleBackend {
                     })?
                 } else {
                     conn.query(
-                        "SELECT c.id, c.document_id, c.content
+                        "SELECT c.id, c.document_id, d.path, c.content
                          FROM IRON_CHUNKS c
                          JOIN IRON_MEMORIES d ON d.id = c.document_id
                          WHERE d.user_id = :1 AND d.agent_id IS NULL
@@ -807,16 +801,18 @@ impl WorkspaceStore for OracleBackend {
                 };
 
                 let mut results = Vec::new();
-                if let Some(row_result) = rows.into_iter().next() {
+                for row_result in rows {
                     let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                         reason: format!("FTS row error: {e}"),
                     })?;
                     let chunk_id_str: String = row.get(0).unwrap_or_default();
                     let doc_id_str: String = row.get(1).unwrap_or_default();
-                    let content: String = row.get(2).unwrap_or_default();
+                    let document_path: String = row.get(2).unwrap_or_default();
+                    let content: String = row.get(3).unwrap_or_default();
                     results.push(RankedResult {
                         chunk_id: chunk_id_str.parse().unwrap_or_default(),
                         document_id: doc_id_str.parse().unwrap_or_default(),
+                        document_path,
                         content,
                         rank: results.len() as u32 + 1,
                     });
@@ -839,7 +835,7 @@ impl WorkspaceStore for OracleBackend {
 
                     let rows = if let Some(ref aid) = agent_id_str {
                         conn.query(
-                            "SELECT c.id, c.document_id, c.content
+                            "SELECT c.id, c.document_id, d.path, c.content
                              FROM IRON_CHUNKS c
                              JOIN IRON_MEMORIES d ON d.id = c.document_id
                              WHERE d.user_id = :1 AND d.agent_id = :2
@@ -853,7 +849,7 @@ impl WorkspaceStore for OracleBackend {
                         })?
                     } else {
                         conn.query(
-                            "SELECT c.id, c.document_id, c.content
+                            "SELECT c.id, c.document_id, d.path, c.content
                              FROM IRON_CHUNKS c
                              JOIN IRON_MEMORIES d ON d.id = c.document_id
                              WHERE d.user_id = :1 AND d.agent_id IS NULL
@@ -868,16 +864,18 @@ impl WorkspaceStore for OracleBackend {
                     };
 
                     let mut results = Vec::new();
-                    if let Some(row_result) = rows.into_iter().next() {
+                    for row_result in rows {
                         let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                             reason: format!("Vector row error: {e}"),
                         })?;
                         let chunk_id_str: String = row.get(0).unwrap_or_default();
                         let doc_id_str: String = row.get(1).unwrap_or_default();
-                        let content: String = row.get(2).unwrap_or_default();
+                        let document_path: String = row.get(2).unwrap_or_default();
+                        let content: String = row.get(3).unwrap_or_default();
                         results.push(RankedResult {
                             chunk_id: chunk_id_str.parse().unwrap_or_default(),
                             document_id: doc_id_str.parse().unwrap_or_default(),
+                            document_path,
                             content,
                             rank: results.len() as u32 + 1,
                         });

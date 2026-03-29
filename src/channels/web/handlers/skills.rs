@@ -8,11 +8,13 @@ use axum::{
     http::StatusCode,
 };
 
+use crate::channels::web::auth::AuthenticatedUser;
 use crate::channels::web::server::GatewayState;
 use crate::channels::web::types::*;
 
 pub async fn skills_list_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(_user): AuthenticatedUser,
 ) -> Result<Json<SkillListResponse>, (StatusCode, String)> {
     let registry = state.skill_registry.as_ref().ok_or((
         StatusCode::NOT_IMPLEMENTED,
@@ -45,6 +47,7 @@ pub async fn skills_list_handler(
 
 pub async fn skills_search_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Json(req): Json<SkillSearchRequest>,
 ) -> Result<Json<SkillSearchResponse>, (StatusCode, String)> {
     let registry = state.skill_registry.as_ref().ok_or((
@@ -119,6 +122,7 @@ pub async fn skills_search_handler(
 
 pub async fn skills_install_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<SkillInstallRequest>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
@@ -135,6 +139,8 @@ pub async fn skills_install_handler(
         ));
     }
 
+    tracing::info!(user_id = %user.user_id, skill = %req.name, "skill install requested");
+
     let registry = state.skill_registry.as_ref().ok_or((
         StatusCode::NOT_IMPLEMENTED,
         "Skills system not enabled".to_string(),
@@ -148,7 +154,14 @@ pub async fn skills_install_handler(
             .await
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
     } else if let Some(ref catalog) = state.skill_catalog {
-        let url = crate::skills::catalog::skill_download_url(catalog.registry_url(), &req.name);
+        // Prefer slug (e.g. "owner/skill-name") over display name for the
+        // download URL, since the registry endpoint expects a slug.
+        let download_key = req
+            .slug
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&req.name);
+        let url = crate::skills::catalog::skill_download_url(catalog.registry_url(), download_key);
         crate::tools::builtin::skill_tools::fetch_skill_content(&url)
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?
@@ -212,6 +225,7 @@ pub async fn skills_install_handler(
 
 pub async fn skills_remove_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
     headers: axum::http::HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
@@ -226,6 +240,8 @@ pub async fn skills_remove_handler(
             "Skill removal requires X-Confirm-Action: true header".to_string(),
         ));
     }
+
+    tracing::info!(user_id = %user.user_id, skill = %name, "skill remove requested");
 
     let registry = state.skill_registry.as_ref().ok_or((
         StatusCode::NOT_IMPLEMENTED,

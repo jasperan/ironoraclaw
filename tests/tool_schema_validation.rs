@@ -6,8 +6,8 @@
 //!
 //! See: <https://github.com/nearai/ironclaw/issues/352> (QA plan, item 1.1)
 
-use ironoraclaw::tools::validate_tool_schema;
-use ironoraclaw::tools::{Tool, ToolRegistry};
+use ironclaw::tools::validate_tool_schema;
+use ironclaw::tools::{Tool, ToolRegistry};
 
 /// Validate schemas of all tools registered via `register_builtin_tools()` and
 /// `register_dev_tools()` (echo, time, json, http, shell, file tools).
@@ -83,7 +83,7 @@ async fn core_registration_covers_expected_tools() {
 fn json_tool_freeform_data_field_is_valid() {
     // Regression: json tool's "data" field intentionally has no "type" for
     // OpenAI compatibility (union types with arrays require "items").
-    let tool = ironoraclaw::tools::builtin::JsonTool;
+    let tool = ironclaw::tools::builtin::JsonTool;
     let schema = tool.parameters_schema();
     let errors = validate_tool_schema(&schema, "json");
     assert!(errors.is_empty(), "json tool schema errors: {errors:?}");
@@ -102,7 +102,7 @@ fn json_tool_freeform_data_field_is_valid() {
 #[test]
 fn http_tool_headers_array_is_valid() {
     // Regression: http tool's "headers" is an array of {name, value} objects.
-    let tool = ironoraclaw::tools::builtin::HttpTool::new();
+    let tool = ironclaw::tools::builtin::HttpTool::new();
     let schema = tool.parameters_schema();
     let errors = validate_tool_schema(&schema, "http");
     assert!(errors.is_empty(), "http tool schema errors: {errors:?}");
@@ -125,7 +125,7 @@ fn http_tool_headers_array_is_valid() {
 
 #[test]
 fn time_tool_schema_is_valid() {
-    let tool = ironoraclaw::tools::builtin::TimeTool;
+    let tool = ironclaw::tools::builtin::TimeTool;
     let schema = tool.parameters_schema();
     let errors = validate_tool_schema(&schema, "time");
     assert!(errors.is_empty(), "time tool schema errors: {errors:?}");
@@ -133,8 +133,34 @@ fn time_tool_schema_is_valid() {
 
 #[test]
 fn shell_tool_schema_is_valid() {
-    let tool = ironoraclaw::tools::builtin::ShellTool::new();
+    let tool = ironclaw::tools::builtin::ShellTool::new();
     let schema = tool.parameters_schema();
     let errors = validate_tool_schema(&schema, "shell");
     assert!(errors.is_empty(), "shell tool schema errors: {errors:?}");
+}
+
+/// Validates that all core tools work correctly under a multi-threaded tokio runtime.
+/// This catches sync-async boundary bugs like tokio::sync::RwLock::blocking_read()
+/// panicking when called from within a multi-threaded runtime context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn all_core_tools_work_in_multi_thread_runtime() {
+    let registry = ToolRegistry::new();
+    registry.register_builtin_tools();
+    registry.register_dev_tools();
+
+    let tools = registry.all().await;
+    assert!(
+        !tools.is_empty(),
+        "registry should have tools after registration"
+    );
+
+    for tool in &tools {
+        // These sync trait methods must not panic in multi-thread runtime
+        let _ = tool.name();
+        let _ = tool.description();
+        let _ = tool.parameters_schema();
+        let _ = tool.requires_approval(&serde_json::json!({}));
+        let _ = tool.requires_sanitization();
+        let _ = tool.domain();
+    }
 }

@@ -220,7 +220,7 @@ pub fn init_tracing(log_broadcaster: Arc<LogBroadcaster>) -> Arc<LogLevelHandle>
 /// fields from a tracing event.
 ///
 /// The terminal formatter shows something like:
-///   INFO ironoraclaw::agent: Request completed url="http://..." status=200
+///   INFO ironclaw::agent: Request completed url="http://..." status=200
 ///
 /// We replicate that by capturing both the message and the extra fields.
 struct MessageVisitor {
@@ -336,7 +336,7 @@ mod tests {
 
         broadcaster.send(LogEntry {
             level: "WARN".to_string(),
-            target: "ironoraclaw::test".to_string(),
+            target: "ironclaw::test".to_string(),
             message: "test warning".to_string(),
             timestamp: "2024-01-01T00:00:00.000Z".to_string(),
         });
@@ -350,7 +350,7 @@ mod tests {
     fn test_log_entry_serialization() {
         let entry = LogEntry {
             level: "ERROR".to_string(),
-            target: "ironoraclaw::agent".to_string(),
+            target: "ironclaw::agent".to_string(),
             message: "something broke".to_string(),
             timestamp: "2024-01-01T00:00:00.000Z".to_string(),
         };
@@ -455,8 +455,9 @@ mod tests {
     #[test]
     fn test_leak_detector_scrubs_api_key_in_log() {
         let detector = crate::safety::LeakDetector::new();
-        let msg = "Connecting with token sk-proj-test1234567890abcdefghij";
-        let result = detector.scan_and_clean(msg);
+        let token = ["sk", "-proj-", "test1234567890abcdefghij"].concat();
+        let msg = format!("Connecting with token {token}");
+        let result = detector.scan_and_clean(&msg);
         // Should be blocked (OpenAI key pattern)
         assert!(result.is_err());
     }

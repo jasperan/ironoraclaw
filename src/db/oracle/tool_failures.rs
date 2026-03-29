@@ -40,7 +40,9 @@ impl ToolFailureStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             // MERGE INTO for upsert: insert new or increment failure_count
             conn.execute(
                 "MERGE INTO IRON_TOOL_FAILURES t
@@ -60,7 +62,8 @@ impl ToolFailureStore for OracleBackend {
                 &[&tool_name, &error_message, &now],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await

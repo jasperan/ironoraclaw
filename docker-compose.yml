@@ -54,7 +54,7 @@ services:
       - IRONORACLAW_ORACLE_PASSWORD=${ORACLE_PWD:-IronOraClaw2026}
       - LLM_BACKEND=${LLM_BACKEND:-ollama}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:35b-a3b}
       - IRONCLAW_ALLOW_PUBLIC_BIND=true
     ports:
       - "${GATEWAY_PORT:-8080}:8080"

@@ -10,19 +10,19 @@ pub mod schema;
 // Sub-trait implementations (one file per Database sub-trait).
 pub mod conversations;
 pub mod jobs;
-pub mod sandbox;
 pub mod routines;
-pub mod tool_failures;
+pub mod sandbox;
 pub mod settings;
+pub mod tool_failures;
 pub mod workspace;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::config::DatabaseConfig;
 use crate::db::Database;
 use crate::error::DatabaseError;
-use crate::config::DatabaseConfig;
 
 pub use connection::OracleConnectionManager;
 
@@ -42,11 +42,9 @@ impl OracleBackend {
     /// returns the backend ready for use.
     pub async fn new(config: &DatabaseConfig) -> Result<Self, anyhow::Error> {
         let config = config.clone();
-        let conn_mgr = tokio::task::spawn_blocking(move || {
-            OracleConnectionManager::new(&config)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))??;
+        let conn_mgr = tokio::task::spawn_blocking(move || OracleConnectionManager::new(&config))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))??;
 
         Ok(Self {
             conn_mgr: Arc::new(conn_mgr),

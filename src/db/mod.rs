@@ -16,6 +16,9 @@ pub mod oracle;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+#[cfg(feature = "postgres")]
+pub mod tls;
+
 #[cfg(feature = "libsql")]
 pub mod libsql;
 
@@ -36,8 +39,8 @@ use crate::context::{ActionRecord, JobContext, JobState};
 use crate::error::DatabaseError;
 use crate::error::WorkspaceError;
 use crate::history::{
-    ConversationMessage, ConversationSummary, JobEventRecord, LlmCallRecord, SandboxJobRecord,
-    SandboxJobSummary, SettingRow,
+    AgentJobRecord, AgentJobSummary, ConversationMessage, ConversationSummary, JobEventRecord,
+    LlmCallRecord, SandboxJobRecord, SandboxJobSummary, SettingRow,
 };
 use crate::workspace::{MemoryChunk, MemoryDocument, WorkspaceEntry};
 use crate::workspace::{SearchConfig, SearchResult};
@@ -52,6 +55,29 @@ use crate::workspace::{SearchConfig, SearchResult};
 pub async fn connect_from_config(
     config: &crate::config::DatabaseConfig,
 ) -> Result<Arc<dyn Database>, DatabaseError> {
+    let (db, _handles) = connect_with_handles(config).await?;
+    Ok(db)
+}
+
+/// Backend-specific handles retained after database connection.
+///
+/// These are needed by satellite stores (e.g., `SecretsStore`) that require
+/// a backend-specific handle rather than the generic `Arc<dyn Database>`.
+#[derive(Default)]
+pub struct DatabaseHandles {
+    #[cfg(feature = "postgres")]
+    pub pg_pool: Option<deadpool_postgres::Pool>,
+    #[cfg(feature = "libsql")]
+    pub libsql_db: Option<Arc<::libsql::Database>>,
+}
+
+/// Connect to the database, run migrations, and return both the generic
+/// `Database` trait object and the backend-specific handles.
+pub async fn connect_with_handles(
+    config: &crate::config::DatabaseConfig,
+) -> Result<(Arc<dyn Database>, DatabaseHandles), DatabaseError> {
+    let mut handles = DatabaseHandles::default();
+
     match config.backend {
         #[cfg(feature = "oracle")]
         crate::config::DatabaseBackend::Oracle => {
@@ -59,7 +85,7 @@ pub async fn connect_from_config(
                 .await
                 .map_err(|e| DatabaseError::Pool(e.to_string()))?;
             backend.run_migrations().await?;
-            Ok(Arc::new(backend))
+            Ok((Arc::new(backend) as Arc<dyn Database>, handles))
         }
         #[cfg(feature = "libsql")]
         crate::config::DatabaseBackend::LibSql => {
@@ -83,21 +109,216 @@ pub async fn connect_from_config(
                     .map_err(|e| DatabaseError::Pool(e.to_string()))?
             };
             backend.run_migrations().await?;
-            Ok(Arc::new(backend))
+            tracing::debug!("libSQL database connected and migrations applied");
+
+            handles.libsql_db = Some(backend.shared_db());
+
+            Ok((Arc::new(backend) as Arc<dyn Database>, handles))
         }
         #[cfg(feature = "postgres")]
-        _ => {
+        crate::config::DatabaseBackend::Postgres => {
             let pg = postgres::PgBackend::new(config)
                 .await
                 .map_err(|e| DatabaseError::Pool(e.to_string()))?;
             pg.run_migrations().await?;
-            Ok(Arc::new(pg))
+            tracing::info!("PostgreSQL database connected and migrations applied");
+
+            handles.pg_pool = Some(pg.pool());
+
+            Ok((Arc::new(pg) as Arc<dyn Database>, handles))
         }
-        #[cfg(not(feature = "postgres"))]
-        _ => Err(DatabaseError::Pool(
-            "No database backend available. Enable 'oracle', 'postgres', or 'libsql' feature.".to_string(),
-        )),
+        #[allow(unreachable_patterns)]
+        _ => Err(DatabaseError::Pool(format!(
+            "Database backend '{}' is not available. Rebuild with the appropriate feature flag.",
+            config.backend
+        ))),
     }
+}
+
+/// Create a secrets store from database and secrets configuration.
+///
+/// This is the shared factory for CLI commands and other call sites that need
+/// a `SecretsStore` without going through the full `AppBuilder`. Mirrors the
+/// pattern of [`connect_from_config`] but returns a secrets-specific store.
+pub async fn create_secrets_store(
+    config: &crate::config::DatabaseConfig,
+    crypto: Arc<crate::secrets::SecretsCrypto>,
+) -> Result<Arc<dyn crate::secrets::SecretsStore + Send + Sync>, DatabaseError> {
+    match config.backend {
+        #[cfg(feature = "libsql")]
+        crate::config::DatabaseBackend::LibSql => {
+            use secrecy::ExposeSecret as _;
+
+            let default_path = crate::config::default_libsql_path();
+            let db_path = config.libsql_path.as_deref().unwrap_or(&default_path);
+
+            let backend = if let Some(ref url) = config.libsql_url {
+                let token = config.libsql_auth_token.as_ref().ok_or_else(|| {
+                    DatabaseError::Pool(
+                        "LIBSQL_AUTH_TOKEN required when LIBSQL_URL is set".to_string(),
+                    )
+                })?;
+                libsql::LibSqlBackend::new_remote_replica(db_path, url, token.expose_secret())
+                    .await
+                    .map_err(|e| DatabaseError::Pool(e.to_string()))?
+            } else {
+                libsql::LibSqlBackend::new_local(db_path)
+                    .await
+                    .map_err(|e| DatabaseError::Pool(e.to_string()))?
+            };
+            backend.run_migrations().await?;
+
+            Ok(Arc::new(crate::secrets::LibSqlSecretsStore::new(
+                backend.shared_db(),
+                crypto,
+            )))
+        }
+        #[cfg(feature = "postgres")]
+        crate::config::DatabaseBackend::Postgres => {
+            let pg = postgres::PgBackend::new(config)
+                .await
+                .map_err(|e| DatabaseError::Pool(e.to_string()))?;
+            pg.run_migrations().await?;
+
+            Ok(Arc::new(crate::secrets::PostgresSecretsStore::new(
+                pg.pool(),
+                crypto,
+            )))
+        }
+        #[allow(unreachable_patterns)]
+        _ => Err(DatabaseError::Pool(format!(
+            "Database backend '{}' is not available for secrets. Rebuild with the appropriate feature flag.",
+            config.backend
+        ))),
+    }
+}
+
+// ==================== Wizard / testing helpers ====================
+
+/// Connect to the database WITHOUT running migrations, validating
+/// prerequisites when applicable (PostgreSQL version, pgvector).
+///
+/// Returns both the `Database` trait object and backend-specific handles.
+/// Used by the wizard to test connectivity before committing — call
+/// [`Database::run_migrations`] on the returned trait object when ready.
+pub async fn connect_without_migrations(
+    config: &crate::config::DatabaseConfig,
+) -> Result<(Arc<dyn Database>, DatabaseHandles), DatabaseError> {
+    let mut handles = DatabaseHandles::default();
+
+    match config.backend {
+        #[cfg(feature = "libsql")]
+        crate::config::DatabaseBackend::LibSql => {
+            use secrecy::ExposeSecret as _;
+
+            let default_path = crate::config::default_libsql_path();
+            let db_path = config.libsql_path.as_deref().unwrap_or(&default_path);
+
+            let backend = if let Some(ref url) = config.libsql_url {
+                let token = config.libsql_auth_token.as_ref().ok_or_else(|| {
+                    DatabaseError::Pool(
+                        "LIBSQL_AUTH_TOKEN required when LIBSQL_URL is set".to_string(),
+                    )
+                })?;
+                libsql::LibSqlBackend::new_remote_replica(db_path, url, token.expose_secret())
+                    .await
+                    .map_err(|e| DatabaseError::Pool(e.to_string()))?
+            } else {
+                libsql::LibSqlBackend::new_local(db_path)
+                    .await
+                    .map_err(|e| DatabaseError::Pool(e.to_string()))?
+            };
+
+            handles.libsql_db = Some(backend.shared_db());
+
+            Ok((Arc::new(backend) as Arc<dyn Database>, handles))
+        }
+        #[cfg(feature = "postgres")]
+        crate::config::DatabaseBackend::Postgres => {
+            let pg = postgres::PgBackend::new(config)
+                .await
+                .map_err(|e| DatabaseError::Pool(e.to_string()))?;
+
+            handles.pg_pool = Some(pg.pool());
+
+            // Validate PostgreSQL prerequisites (version, pgvector)
+            validate_postgres(&pg.pool()).await?;
+
+            Ok((Arc::new(pg) as Arc<dyn Database>, handles))
+        }
+        #[allow(unreachable_patterns)]
+        _ => Err(DatabaseError::Pool(format!(
+            "Database backend '{}' is not available. Rebuild with the appropriate feature flag.",
+            config.backend
+        ))),
+    }
+}
+
+/// Validate PostgreSQL prerequisites (version >= 15, pgvector available).
+///
+/// Returns `Ok(())` if all prerequisites are met, or a `DatabaseError`
+/// with a user-facing message describing the issue.
+#[cfg(feature = "postgres")]
+async fn validate_postgres(pool: &deadpool_postgres::Pool) -> Result<(), DatabaseError> {
+    let client = pool
+        .get()
+        .await
+        .map_err(|e| DatabaseError::Pool(format!("Failed to connect: {}", e)))?;
+
+    // Check PostgreSQL server version (need 15+ for pgvector).
+    let version_row = client
+        .query_one("SHOW server_version", &[])
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Failed to query server version: {}", e)))?;
+    let version_str: &str = version_row.get(0);
+    let major_version = version_str
+        .split('.')
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .ok_or_else(|| {
+            DatabaseError::Pool(format!(
+                "Could not parse PostgreSQL version from '{}'. \
+                 Expected a numeric major version (e.g., '15.2').",
+                version_str
+            ))
+        })?;
+
+    const MIN_PG_MAJOR_VERSION: u32 = 15;
+
+    if major_version < MIN_PG_MAJOR_VERSION {
+        return Err(DatabaseError::Pool(format!(
+            "PostgreSQL {} detected. IronClaw requires PostgreSQL {} or later \
+             for pgvector support.\n\
+             Upgrade: https://www.postgresql.org/download/",
+            version_str, MIN_PG_MAJOR_VERSION
+        )));
+    }
+
+    // Check if pgvector extension is available.
+    let pgvector_row = client
+        .query_opt(
+            "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'",
+            &[],
+        )
+        .await
+        .map_err(|e| {
+            DatabaseError::Query(format!("Failed to check pgvector availability: {}", e))
+        })?;
+
+    if pgvector_row.is_none() {
+        return Err(DatabaseError::Pool(format!(
+            "pgvector extension not found on your PostgreSQL server.\n\n\
+             Install it:\n  \
+             macOS:   brew install pgvector\n  \
+             Ubuntu:  apt install postgresql-{0}-pgvector\n  \
+             Docker:  use the pgvector/pgvector:pg{0} image\n  \
+             Source:  https://github.com/pgvector/pgvector#installation\n\n\
+             Then restart PostgreSQL and re-run: ironclaw onboard",
+            major_version
+        )));
+    }
+
+    Ok(())
 }
 
 // ==================== Sub-traits ====================
@@ -127,13 +348,28 @@ pub trait ConversationStore: Send + Sync {
         channel: &str,
         user_id: &str,
         thread_id: Option<&str>,
-    ) -> Result<(), DatabaseError>;
+    ) -> Result<bool, DatabaseError>;
     async fn list_conversations_with_preview(
         &self,
         user_id: &str,
         channel: &str,
         limit: i64,
     ) -> Result<Vec<ConversationSummary>, DatabaseError>;
+    async fn list_conversations_all_channels(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<ConversationSummary>, DatabaseError>;
+    async fn get_or_create_routine_conversation(
+        &self,
+        routine_id: Uuid,
+        routine_name: &str,
+        user_id: &str,
+    ) -> Result<Uuid, DatabaseError>;
+    async fn get_or_create_heartbeat_conversation(
+        &self,
+        user_id: &str,
+    ) -> Result<Uuid, DatabaseError>;
     async fn get_or_create_assistant_conversation(
         &self,
         user_id: &str,
@@ -184,6 +420,19 @@ pub trait JobStore: Send + Sync {
     ) -> Result<(), DatabaseError>;
     async fn mark_job_stuck(&self, id: Uuid) -> Result<(), DatabaseError>;
     async fn get_stuck_jobs(&self) -> Result<Vec<Uuid>, DatabaseError>;
+    async fn list_agent_jobs(&self) -> Result<Vec<AgentJobRecord>, DatabaseError>;
+    async fn list_agent_jobs_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<AgentJobRecord>, DatabaseError>;
+    async fn agent_job_summary(&self) -> Result<AgentJobSummary, DatabaseError>;
+    async fn agent_job_summary_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<AgentJobSummary, DatabaseError>;
+    /// Get the failure reason for a single agent job (O(1) lookup).
+    async fn get_agent_job_failure_reason(&self, id: Uuid)
+    -> Result<Option<String>, DatabaseError>;
     async fn save_action(&self, job_id: Uuid, action: &ActionRecord) -> Result<(), DatabaseError>;
     async fn get_job_actions(&self, job_id: Uuid) -> Result<Vec<ActionRecord>, DatabaseError>;
     async fn record_llm_call(&self, record: &LlmCallRecord<'_>) -> Result<Uuid, DatabaseError>;
@@ -259,6 +508,7 @@ pub trait RoutineStore: Send + Sync {
         name: &str,
     ) -> Result<Option<Routine>, DatabaseError>;
     async fn list_routines(&self, user_id: &str) -> Result<Vec<Routine>, DatabaseError>;
+    async fn list_all_routines(&self) -> Result<Vec<Routine>, DatabaseError>;
     async fn list_event_routines(&self) -> Result<Vec<Routine>, DatabaseError>;
     async fn list_due_cron_routines(&self) -> Result<Vec<Routine>, DatabaseError>;
     async fn update_routine(&self, routine: &Routine) -> Result<(), DatabaseError>;
@@ -286,11 +536,33 @@ pub trait RoutineStore: Send + Sync {
         limit: i64,
     ) -> Result<Vec<RoutineRun>, DatabaseError>;
     async fn count_running_routine_runs(&self, routine_id: Uuid) -> Result<i64, DatabaseError>;
+    async fn count_running_routine_runs_batch(
+        &self,
+        routine_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, i64>, DatabaseError>;
+
+    /// Fetch the last run status for multiple routines in a single query.
+    /// Returns a map from routine_id to its most recent RunStatus.
+    /// Routines with no runs are omitted from the result.
+    async fn batch_get_last_run_status(
+        &self,
+        routine_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, RunStatus>, DatabaseError>;
+
     async fn link_routine_run_to_job(
         &self,
         run_id: Uuid,
         job_id: Uuid,
     ) -> Result<(), DatabaseError>;
+    async fn get_webhook_routine_by_path(
+        &self,
+        path: &str,
+        user_id: Option<&str>,
+    ) -> Result<Option<Routine>, DatabaseError>;
+
+    /// List routine runs that were dispatched as full_job but have not yet
+    /// been finalized (status='running' with a linked job_id).
+    async fn list_dispatched_routine_runs(&self) -> Result<Vec<RoutineRun>, DatabaseError>;
 }
 
 #[async_trait]
@@ -402,6 +674,103 @@ pub trait WorkspaceStore: Send + Sync {
         embedding: Option<&[f32]>,
         config: &SearchConfig,
     ) -> Result<Vec<SearchResult>, WorkspaceError>;
+
+    // ==================== Multi-scope read methods ====================
+    //
+    // Default implementations loop over user_ids calling single-scope methods,
+    // then merge results. Backends can override with efficient SQL (e.g.,
+    // `WHERE user_id = ANY($1::text[])`).
+
+    /// Hybrid search across multiple user scopes, merging results by score.
+    ///
+    /// **Note:** The default implementation calls `hybrid_search` per scope and
+    /// merges by raw score. Because RRF scores are normalized independently
+    /// within each scope, scores are not directly comparable across scopes.
+    /// The Postgres backend overrides this with a single combined query that
+    /// applies RRF once to the unified result set.
+    async fn hybrid_search_multi(
+        &self,
+        user_ids: &[String],
+        agent_id: Option<Uuid>,
+        query: &str,
+        embedding: Option<&[f32]>,
+        config: &SearchConfig,
+    ) -> Result<Vec<SearchResult>, WorkspaceError> {
+        if user_ids.len() > 1 {
+            tracing::debug!(
+                scope_count = user_ids.len(),
+                "hybrid_search_multi: using default per-scope RRF merge; \
+                 cross-scope score comparison may be unreliable"
+            );
+        }
+        let mut all_results = Vec::new();
+        for uid in user_ids {
+            let results = self
+                .hybrid_search(uid, agent_id, query, embedding, config)
+                .await?;
+            all_results.extend(results);
+        }
+        // Re-sort by score descending and truncate to limit
+        all_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        all_results.truncate(config.limit);
+        Ok(all_results)
+    }
+
+    /// List all file paths across multiple user scopes.
+    async fn list_all_paths_multi(
+        &self,
+        user_ids: &[String],
+        agent_id: Option<Uuid>,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        let mut all_paths = Vec::new();
+        for uid in user_ids {
+            let paths = self.list_all_paths(uid, agent_id).await?;
+            all_paths.extend(paths);
+        }
+        all_paths.sort();
+        all_paths.dedup();
+        Ok(all_paths)
+    }
+
+    /// Get a document by path, searching across multiple user scopes.
+    ///
+    /// Returns the first match found (tries each user_id in order).
+    async fn get_document_by_path_multi(
+        &self,
+        user_ids: &[String],
+        agent_id: Option<Uuid>,
+        path: &str,
+    ) -> Result<MemoryDocument, WorkspaceError> {
+        for uid in user_ids {
+            match self.get_document_by_path(uid, agent_id, path).await {
+                Ok(doc) => return Ok(doc),
+                Err(WorkspaceError::DocumentNotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(WorkspaceError::DocumentNotFound {
+            doc_type: path.to_string(),
+            user_id: format!("[{}]", user_ids.join(", ")),
+        })
+    }
+
+    /// List directory contents across multiple user scopes.
+    async fn list_directory_multi(
+        &self,
+        user_ids: &[String],
+        agent_id: Option<Uuid>,
+        directory: &str,
+    ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
+        let mut all_entries = Vec::new();
+        for uid in user_ids {
+            all_entries.extend(self.list_directory(uid, agent_id, directory).await?);
+        }
+        Ok(crate::workspace::merge_workspace_entries(all_entries))
+    }
 }
 
 /// Backend-agnostic database supertrait.
@@ -422,4 +791,56 @@ pub trait Database:
 {
     /// Run schema migrations for this backend.
     async fn run_migrations(&self) -> Result<(), DatabaseError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `create_secrets_store` selects the correct backend at
+    /// runtime based on `DatabaseConfig`, not at compile time. Previously the
+    /// CLI duplicated this logic with compile-time `#[cfg]` gates that always
+    /// chose postgres when both features were enabled (PR #209).
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_create_secrets_store_libsql_backend() {
+        use secrecy::SecretString;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+
+        let config = crate::config::DatabaseConfig {
+            backend: crate::config::DatabaseBackend::LibSql,
+            libsql_path: Some(db_path),
+            libsql_url: None,
+            libsql_auth_token: None,
+            url: SecretString::from("unused://libsql".to_string()),
+            pool_size: 1,
+            ssl_mode: crate::config::SslMode::default(),
+            oracle_host: "localhost".to_string(),
+            oracle_port: 1521,
+            oracle_service: "FREEPDB1".to_string(),
+            oracle_user: "ironoraclaw".to_string(),
+            oracle_password: SecretString::from("IronOraClaw2026".to_string()),
+            oracle_mode: "freepdb".to_string(),
+            oracle_dsn: None,
+            oracle_onnx_model: "ALL_MINILM_L12_V2".to_string(),
+            oracle_agent_id: "default".to_string(),
+        };
+
+        let master_key = SecretString::from("a]".repeat(16));
+        let crypto = Arc::new(crate::secrets::SecretsCrypto::new(master_key).unwrap());
+
+        let store = create_secrets_store(&config, crypto).await;
+        assert!(
+            store.is_ok(),
+            "create_secrets_store should succeed for libsql backend"
+        );
+
+        // Verify basic operation works
+        let store = store.unwrap();
+        let exists = store.exists("test_user", "nonexistent_secret").await;
+        assert!(exists.is_ok());
+        assert!(!exists.unwrap());
+    }
 }

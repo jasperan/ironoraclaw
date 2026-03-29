@@ -124,7 +124,7 @@ impl ConversationStore for OracleBackend {
         channel: &str,
         user_id: &str,
         thread_id: Option<&str>,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<bool, DatabaseError> {
         let conn_mgr = self.conn_mgr.clone();
         let id_str = id.to_string();
         let channel = channel.to_string();
@@ -135,19 +135,23 @@ impl ConversationStore for OracleBackend {
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
             let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            conn.execute(
+            let stmt = conn.execute(
                 "MERGE INTO IRON_CONVERSATIONS c \
                  USING (SELECT :1 AS id FROM DUAL) src \
                  ON (c.id = src.id) \
                  WHEN NOT MATCHED THEN \
                      INSERT (id, channel, user_id, thread_id) VALUES (:1, :2, :3, :4) \
                  WHEN MATCHED THEN \
-                     UPDATE SET c.last_activity = TO_TIMESTAMP(:5, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"')",
+                     UPDATE SET c.last_activity = TO_TIMESTAMP(:5, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') \
+                     WHERE c.user_id = :3 AND c.channel = :2",
                 &[&id_str, &channel, &user_id, &thread_id as &dyn oracle::sql_type::ToSql, &now],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let affected = stmt
+                .row_count()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
-            Ok::<_, DatabaseError>(())
+            Ok::<_, DatabaseError>(affected > 0)
         })
         .await
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
@@ -171,6 +175,7 @@ impl ConversationStore for OracleBackend {
                 TO_CHAR(c.started_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS started_at, \
                 TO_CHAR(c.last_activity, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS last_activity, \
                 c.metadata, \
+                c.channel, \
                 (SELECT COUNT(*) FROM IRON_MESSAGES m WHERE m.conversation_id = c.id AND m.role = 'user') AS message_count, \
                 (SELECT SUBSTR(m2.content, 1, 100) FROM IRON_MESSAGES m2 \
                  WHERE m2.conversation_id = c.id AND m2.role = 'user' \
@@ -180,18 +185,20 @@ impl ConversationStore for OracleBackend {
                 ORDER BY c.last_activity DESC \
                 FETCH FIRST :3 ROWS ONLY";
 
-            let rows = conn.query(sql, &[&user_id, &channel, &limit])
+            let rows = conn
+                .query(sql, &[&user_id, &channel, &limit])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut results = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let started_at_str: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let last_activity_str: String = row.get(2).map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let metadata_str: Option<String> = row.get(3).map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let message_count: i64 = row.get(4).map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let title: Option<String> = row.get(5).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let channel_name: String = row.get(4).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let message_count: i64 = row.get(5).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let sql_title: Option<String> = row.get(6).map_err(|e| DatabaseError::Query(e.to_string()))?;
 
                 let metadata: serde_json::Value = metadata_str
                     .as_deref()
@@ -201,6 +208,12 @@ impl ConversationStore for OracleBackend {
                     .get("thread_type")
                     .and_then(|v| v.as_str())
                     .map(String::from);
+                let title = sql_title.or_else(|| {
+                    metadata
+                        .get("routine_name")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                });
 
                 results.push(ConversationSummary {
                     id: id_str.parse().unwrap_or_default(),
@@ -209,9 +222,181 @@ impl ConversationStore for OracleBackend {
                     message_count,
                     title,
                     thread_type,
+                    channel: channel_name,
                 });
             }
             Ok::<_, DatabaseError>(results)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn list_conversations_all_channels(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<ConversationSummary>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let sql = "SELECT \
+                c.id, \
+                TO_CHAR(c.started_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS started_at, \
+                TO_CHAR(c.last_activity, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS last_activity, \
+                c.metadata, \
+                c.channel, \
+                (SELECT COUNT(*) FROM IRON_MESSAGES m WHERE m.conversation_id = c.id AND m.role = 'user') AS message_count, \
+                (SELECT SUBSTR(m2.content, 1, 100) FROM IRON_MESSAGES m2 \
+                 WHERE m2.conversation_id = c.id AND m2.role = 'user' \
+                 ORDER BY m2.created_at ASC FETCH FIRST 1 ROW ONLY) AS title \
+                FROM IRON_CONVERSATIONS c \
+                WHERE c.user_id = :1 \
+                ORDER BY c.last_activity DESC \
+                FETCH FIRST :2 ROWS ONLY";
+
+            let rows = conn
+                .query(sql, &[&user_id, &limit])
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut results = Vec::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let started_at_str: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let last_activity_str: String = row.get(2).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let metadata_str: Option<String> = row.get(3).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let channel_name: String = row.get(4).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let message_count: i64 = row.get(5).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let sql_title: Option<String> = row.get(6).map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+                let metadata: serde_json::Value = metadata_str
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let thread_type = metadata
+                    .get("thread_type")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let title = sql_title.or_else(|| {
+                    metadata
+                        .get("routine_name")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                });
+
+                results.push(ConversationSummary {
+                    id: id_str.parse().unwrap_or_default(),
+                    started_at: parse_ts(&started_at_str),
+                    last_activity: parse_ts(&last_activity_str),
+                    message_count,
+                    title,
+                    thread_type,
+                    channel: channel_name,
+                });
+            }
+            Ok::<_, DatabaseError>(results)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn get_or_create_routine_conversation(
+        &self,
+        routine_id: Uuid,
+        routine_name: &str,
+        user_id: &str,
+    ) -> Result<Uuid, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let user_id = user_id.to_string();
+        let routine_id_str = routine_id.to_string();
+        let routine_name = routine_name.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+
+            let existing = conn
+                .query(
+                    "SELECT id FROM IRON_CONVERSATIONS \
+                     WHERE user_id = :1 \
+                       AND JSON_VALUE(metadata, '$.routine_id' RETURNING VARCHAR2(36)) = :2 \
+                     FETCH FIRST 1 ROW ONLY",
+                    &[&user_id, &routine_id_str],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            if let Some(row_result) = existing.into_iter().next() {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                return id_str
+                    .parse()
+                    .map_err(|_| DatabaseError::Serialization("Invalid UUID".to_string()));
+            }
+
+            let id = Uuid::new_v4();
+            let id_str = id.to_string();
+            let metadata = serde_json::json!({
+                "thread_type": "routine",
+                "routine_id": routine_id_str,
+                "routine_name": routine_name,
+            })
+            .to_string();
+
+            conn.execute(
+                "INSERT INTO IRON_CONVERSATIONS (id, channel, user_id, metadata) VALUES (:1, 'routine', :2, :3)",
+                &[&id_str, &user_id, &metadata],
+            )
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            Ok::<_, DatabaseError>(id)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn get_or_create_heartbeat_conversation(
+        &self,
+        user_id: &str,
+    ) -> Result<Uuid, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+
+            let existing = conn
+                .query(
+                    "SELECT id FROM IRON_CONVERSATIONS \
+                     WHERE user_id = :1 \
+                       AND JSON_VALUE(metadata, '$.thread_type' RETURNING VARCHAR2(64)) = 'heartbeat' \
+                     FETCH FIRST 1 ROW ONLY",
+                    &[&user_id],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            if let Some(row_result) = existing.into_iter().next() {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                return id_str
+                    .parse()
+                    .map_err(|_| DatabaseError::Serialization("Invalid UUID".to_string()));
+            }
+
+            let id = Uuid::new_v4();
+            let id_str = id.to_string();
+            let metadata = serde_json::json!({ "thread_type": "heartbeat" }).to_string();
+
+            conn.execute(
+                "INSERT INTO IRON_CONVERSATIONS (id, channel, user_id, metadata) VALUES (:1, 'heartbeat', :2, :3)",
+                &[&id_str, &user_id, &metadata],
+            )
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            Ok::<_, DatabaseError>(id)
         })
         .await
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
@@ -359,16 +544,21 @@ impl ConversationStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
 
             // Read current metadata, merge the key, write back
             let sql = "SELECT metadata FROM IRON_CONVERSATIONS WHERE id = :1";
-            let rows = conn.query(sql, &[&id_str])
+            let rows = conn
+                .query(sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut current: serde_json::Value = serde_json::json!({});
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let meta_str: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let meta_str: Option<String> = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 if let Some(s) = meta_str {
                     current = serde_json::from_str(&s).unwrap_or(serde_json::json!({}));
                 }
@@ -382,7 +572,8 @@ impl ConversationStore for OracleBackend {
                 &[&id_str, &new_meta],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -398,13 +589,18 @@ impl ConversationStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = "SELECT metadata FROM IRON_CONVERSATIONS WHERE id = :1";
-            let rows = conn.query(sql, &[&id_str])
+            let rows = conn
+                .query(sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let meta_str: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let meta_str: Option<String> = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let val = meta_str
                     .and_then(|s| serde_json::from_str(&s).ok())
                     .unwrap_or(serde_json::Value::Null);
@@ -464,13 +660,18 @@ impl ConversationStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = "SELECT COUNT(*) FROM IRON_CONVERSATIONS WHERE id = :1 AND user_id = :2";
-            let rows = conn.query(sql, &[&cid, &user_id])
+            let rows = conn
+                .query(sql, &[&cid, &user_id])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let count: i64 = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let count: i64 = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(count > 0);
             }
             Ok::<_, DatabaseError>(false)

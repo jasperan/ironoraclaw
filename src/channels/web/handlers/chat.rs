@@ -12,22 +12,24 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::channels::IncomingMessage;
+use crate::channels::web::auth::AuthenticatedUser;
 use crate::channels::web::server::GatewayState;
 use crate::channels::web::types::*;
 use crate::channels::web::util::{build_turns_from_db_messages, truncate_preview};
 
 pub async fn chat_send_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<SendMessageResponse>), (StatusCode, String)> {
-    if !state.chat_rate_limiter.check() {
+    if !state.chat_rate_limiter.check(&identity.user_id) {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
             "Rate limit exceeded. Try again shortly.".to_string(),
         ));
     }
 
-    let mut msg = IncomingMessage::new("gateway", &state.user_id, &req.content);
+    let mut msg = IncomingMessage::new("gateway", &identity.user_id, &req.content);
 
     if let Some(ref thread_id) = req.thread_id {
         msg = msg.with_thread(thread_id);
@@ -35,12 +37,19 @@ pub async fn chat_send_handler(
     }
 
     let msg_id = msg.id;
+    let thread_id = msg.thread_id.clone();
 
-    let tx_guard = state.msg_tx.read().await;
-    let tx = tx_guard.as_ref().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "Channel not started".to_string(),
-    ))?;
+    // Clone sender to avoid holding RwLock read guard across send().await
+    let tx = {
+        let tx_guard = state.msg_tx.read().await;
+        tx_guard
+            .as_ref()
+            .ok_or((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Channel not started".to_string(),
+            ))?
+            .clone()
+    };
 
     tx.send(msg).await.map_err(|_| {
         (
@@ -48,6 +57,13 @@ pub async fn chat_send_handler(
             "Channel closed".to_string(),
         )
     })?;
+
+    tracing::debug!(
+        message_id = %msg_id,
+        thread_id = ?thread_id,
+        content_len = req.content.len(),
+        "Message queued to agent loop"
+    );
 
     Ok((
         StatusCode::ACCEPTED,
@@ -60,6 +76,7 @@ pub async fn chat_send_handler(
 
 pub async fn chat_approval_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
     Json(req): Json<ApprovalRequest>,
 ) -> Result<(StatusCode, Json<SendMessageResponse>), (StatusCode, String)> {
     let (approved, always) = match req.action.as_str() {
@@ -95,7 +112,7 @@ pub async fn chat_approval_handler(
         )
     })?;
 
-    let mut msg = IncomingMessage::new("gateway", &state.user_id, content);
+    let mut msg = IncomingMessage::new("gateway", &identity.user_id, content);
 
     if let Some(ref thread_id) = req.thread_id {
         msg = msg.with_thread(thread_id);
@@ -103,11 +120,17 @@ pub async fn chat_approval_handler(
 
     let msg_id = msg.id;
 
-    let tx_guard = state.msg_tx.read().await;
-    let tx = tx_guard.as_ref().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "Channel not started".to_string(),
-    ))?;
+    // Clone sender to avoid holding RwLock read guard across send().await
+    let tx = {
+        let tx_guard = state.msg_tx.read().await;
+        tx_guard
+            .as_ref()
+            .ok_or((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Channel not started".to_string(),
+            ))?
+            .clone()
+    };
 
     tx.send(msg).await.map_err(|_| {
         (
@@ -130,6 +153,7 @@ pub async fn chat_approval_handler(
 /// The token never touches the LLM, chat history, or SSE stream.
 pub async fn chat_auth_token_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(req): Json<AuthTokenRequest>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
     let ext_mgr = state.extension_manager.as_ref().ok_or((
@@ -137,64 +161,74 @@ pub async fn chat_auth_token_handler(
         "Extension manager not available".to_string(),
     ))?;
 
-    let result = ext_mgr
-        .auth(&req.extension_name, Some(&req.token))
+    match ext_mgr
+        .configure_token(&req.extension_name, &req.token, &user.user_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    {
+        Ok(result) => {
+            let mut resp = ActionResponse::ok(result.message.clone());
+            resp.activated = Some(result.activated);
+            resp.auth_url = result.auth_url.clone();
+            resp.verification = result.verification.clone();
+            resp.instructions = result.verification.as_ref().map(|v| v.instructions.clone());
 
-    if result.status == "authenticated" {
-        // Auto-activate so tools are available immediately
-        let msg = match ext_mgr.activate(&req.extension_name).await {
-            Ok(r) => format!(
-                "{} authenticated ({} tools loaded)",
-                req.extension_name,
-                r.tools_loaded.len()
-            ),
-            Err(e) => format!(
-                "{} authenticated but activation failed: {}",
-                req.extension_name, e
-            ),
-        };
+            if result.verification.is_some() {
+                state.sse.broadcast_for_user(
+                    &user.user_id,
+                    AppEvent::AuthRequired {
+                        extension_name: req.extension_name.clone(),
+                        instructions: Some(result.message),
+                        auth_url: None,
+                        setup_url: None,
+                    },
+                );
+            } else {
+                clear_auth_mode(&state, &user.user_id).await;
 
-        // Clear auth mode on the active thread
-        clear_auth_mode(&state).await;
+                state.sse.broadcast_for_user(
+                    &user.user_id,
+                    AppEvent::AuthCompleted {
+                        extension_name: req.extension_name.clone(),
+                        success: true,
+                        message: result.message,
+                    },
+                );
+            }
 
-        state.sse.broadcast(SseEvent::AuthCompleted {
-            extension_name: req.extension_name,
-            success: true,
-            message: msg.clone(),
-        });
-
-        Ok(Json(ActionResponse::ok(msg)))
-    } else {
-        // Re-emit auth_required for retry
-        state.sse.broadcast(SseEvent::AuthRequired {
-            extension_name: req.extension_name.clone(),
-            instructions: result.instructions.clone(),
-            auth_url: result.auth_url.clone(),
-            setup_url: result.setup_url.clone(),
-        });
-        Ok(Json(ActionResponse::fail(
-            result
-                .instructions
-                .unwrap_or_else(|| "Invalid token".to_string()),
-        )))
+            Ok(Json(resp))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if matches!(e, crate::extensions::ExtensionError::ValidationFailed(_)) {
+                state.sse.broadcast_for_user(
+                    &user.user_id,
+                    AppEvent::AuthRequired {
+                        extension_name: req.extension_name.clone(),
+                        instructions: Some(msg.clone()),
+                        auth_url: None,
+                        setup_url: None,
+                    },
+                );
+            }
+            Ok(Json(ActionResponse::fail(msg)))
+        }
     }
 }
 
 /// Cancel an in-progress auth flow.
 pub async fn chat_auth_cancel_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
     Json(_req): Json<AuthCancelRequest>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
-    clear_auth_mode(&state).await;
+    clear_auth_mode(&state, &identity.user_id).await;
     Ok(Json(ActionResponse::ok("Auth cancelled")))
 }
 
 /// Clear pending auth mode on the active thread.
-pub async fn clear_auth_mode(state: &GatewayState) {
+pub async fn clear_auth_mode(state: &GatewayState, user_id: &str) {
     if let Some(ref sm) = state.session_manager {
-        let session = sm.get_or_create_session(&state.user_id).await;
+        let session = sm.get_or_create_session(user_id).await;
         let mut sess = session.lock().await;
         if let Some(thread_id) = sess.active_thread
             && let Some(thread) = sess.threads.get_mut(&thread_id)
@@ -206,8 +240,9 @@ pub async fn clear_auth_mode(state: &GatewayState) {
 
 pub async fn chat_events_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    state.sse.subscribe().ok_or((
+    state.sse.subscribe(Some(user.user_id)).ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Too many connections".to_string(),
     ))
@@ -217,6 +252,7 @@ pub async fn chat_ws_handler(
     headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     // Validate Origin header to prevent cross-site WebSocket hijacking.
     let origin = headers
@@ -242,7 +278,9 @@ pub async fn chat_ws_handler(
             "WebSocket origin not allowed".to_string(),
         ));
     }
-    Ok(ws.on_upgrade(move |socket| crate::channels::web::ws::handle_ws_connection(socket, state)))
+    Ok(ws.on_upgrade(move |socket| {
+        crate::channels::web::ws::handle_ws_connection(socket, state, identity)
+    }))
 }
 
 #[derive(Deserialize)]
@@ -254,6 +292,7 @@ pub struct HistoryQuery {
 
 pub async fn chat_history_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<HistoryResponse>, (StatusCode, String)> {
     let session_manager = state.session_manager.as_ref().ok_or((
@@ -261,8 +300,9 @@ pub async fn chat_history_handler(
         "Session manager not available".to_string(),
     ))?;
 
-    let session = session_manager.get_or_create_session(&state.user_id).await;
-    let sess = session.lock().await;
+    let session = session_manager
+        .get_or_create_session(&identity.user_id)
+        .await;
 
     let limit = query.limit.unwrap_or(50);
     let before_cursor = query
@@ -280,11 +320,12 @@ pub async fn chat_history_handler(
         })
         .transpose()?;
 
-    // Find the thread
+    // Find the thread (lock only briefly to get active_thread if needed)
     let thread_id = if let Some(ref tid) = query.thread_id {
         Uuid::parse_str(tid)
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid thread_id".to_string()))?
     } else {
+        let sess = session.lock().await;
         sess.active_thread
             .ok_or((StatusCode::NOT_FOUND, "No active thread".to_string()))?
     };
@@ -294,11 +335,14 @@ pub async fn chat_history_handler(
         && let Some(ref store) = state.store
     {
         let owned = store
-            .conversation_belongs_to_user(thread_id, &state.user_id)
+            .conversation_belongs_to_user(thread_id, &identity.user_id)
             .await
             .unwrap_or(false);
-        if !owned && !sess.threads.contains_key(&thread_id) {
-            return Err((StatusCode::NOT_FOUND, "Thread not found".to_string()));
+        if !owned {
+            let sess = session.lock().await;
+            if !sess.threads.contains_key(&thread_id) {
+                return Err((StatusCode::NOT_FOUND, "Thread not found".to_string()));
+            }
         }
     }
 
@@ -323,56 +367,62 @@ pub async fn chat_history_handler(
     }
 
     // Try in-memory first (freshest data for active threads)
-    if let Some(thread) = sess.threads.get(&thread_id)
-        && (!thread.turns.is_empty() || thread.pending_approval.is_some())
+    // Lock only when checking in-memory state
     {
-        let turns: Vec<TurnInfo> = thread
-            .turns
-            .iter()
-            .map(|t| TurnInfo {
-                turn_number: t.turn_number,
-                user_input: t.user_input.clone(),
-                response: t.response.clone(),
-                state: format!("{:?}", t.state),
-                started_at: t.started_at.to_rfc3339(),
-                completed_at: t.completed_at.map(|dt| dt.to_rfc3339()),
-                tool_calls: t
-                    .tool_calls
-                    .iter()
-                    .map(|tc| ToolCallInfo {
-                        name: tc.name.clone(),
-                        has_result: tc.result.is_some(),
-                        has_error: tc.error.is_some(),
-                        result_preview: tc.result.as_ref().map(|r| {
-                            let s = match r {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            };
-                            truncate_preview(&s, 500)
-                        }),
-                        error: tc.error.clone(),
-                    })
-                    .collect(),
-            })
-            .collect();
+        let sess = session.lock().await;
+        if let Some(thread) = sess.threads.get(&thread_id)
+            && (!thread.turns.is_empty() || thread.pending_approval.is_some())
+        {
+            let turns: Vec<TurnInfo> = thread
+                .turns
+                .iter()
+                .map(|t| TurnInfo {
+                    turn_number: t.turn_number,
+                    user_input: t.user_input.clone(),
+                    response: t.response.clone(),
+                    state: format!("{:?}", t.state),
+                    started_at: t.started_at.to_rfc3339(),
+                    completed_at: t.completed_at.map(|dt| dt.to_rfc3339()),
+                    tool_calls: t
+                        .tool_calls
+                        .iter()
+                        .map(|tc| ToolCallInfo {
+                            name: tc.name.clone(),
+                            has_result: tc.result.is_some(),
+                            has_error: tc.error.is_some(),
+                            result_preview: tc.result.as_ref().map(|r| {
+                                let s = match r {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
+                                truncate_preview(&s, 500)
+                            }),
+                            error: tc.error.clone(),
+                            rationale: tc.rationale.clone(),
+                        })
+                        .collect(),
+                    narrative: t.narrative.clone(),
+                })
+                .collect();
 
-        let pending_approval = thread
-            .pending_approval
-            .as_ref()
-            .map(|pa| PendingApprovalInfo {
-                request_id: pa.request_id.to_string(),
-                tool_name: pa.tool_name.clone(),
-                description: pa.description.clone(),
-                parameters: serde_json::to_string_pretty(&pa.parameters).unwrap_or_default(),
-            });
+            let pending_approval = thread
+                .pending_approval
+                .as_ref()
+                .map(|pa| PendingApprovalInfo {
+                    request_id: pa.request_id.to_string(),
+                    tool_name: pa.tool_name.clone(),
+                    description: pa.description.clone(),
+                    parameters: serde_json::to_string_pretty(&pa.parameters).unwrap_or_default(),
+                });
 
-        return Ok(Json(HistoryResponse {
-            thread_id,
-            turns,
-            has_more: false,
-            oldest_timestamp: None,
-            pending_approval,
-        }));
+            return Ok(Json(HistoryResponse {
+                thread_id,
+                turns,
+                has_more: false,
+                oldest_timestamp: None,
+                pending_approval,
+            }));
+        }
     }
 
     // Fall back to DB for historical threads not in memory (paginated)
@@ -407,25 +457,27 @@ pub async fn chat_history_handler(
 
 pub async fn chat_threads_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
 ) -> Result<Json<ThreadListResponse>, (StatusCode, String)> {
     let session_manager = state.session_manager.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Session manager not available".to_string(),
     ))?;
 
-    let session = session_manager.get_or_create_session(&state.user_id).await;
-    let sess = session.lock().await;
+    let session = session_manager
+        .get_or_create_session(&identity.user_id)
+        .await;
 
     // Try DB first for persistent thread list
     if let Some(ref store) = state.store {
         // Auto-create assistant thread if it doesn't exist
         let assistant_id = store
-            .get_or_create_assistant_conversation(&state.user_id, "gateway")
+            .get_or_create_assistant_conversation(&identity.user_id, "gateway")
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
         if let Ok(summaries) = store
-            .list_conversations_with_preview(&state.user_id, "gateway", 50)
+            .list_conversations_all_channels(&identity.user_id, 50)
             .await
         {
             let mut assistant_thread = None;
@@ -440,6 +492,7 @@ pub async fn chat_threads_handler(
                     updated_at: s.last_activity.to_rfc3339(),
                     title: s.title.clone(),
                     thread_type: s.thread_type.clone(),
+                    channel: Some(s.channel.clone()),
                 };
 
                 if s.id == assistant_id {
@@ -459,21 +512,30 @@ pub async fn chat_threads_handler(
                     updated_at: chrono::Utc::now().to_rfc3339(),
                     title: None,
                     thread_type: Some("assistant".to_string()),
+                    channel: Some("gateway".to_string()),
                 });
             }
+
+            // Read active thread while holding minimal lock (just before return)
+            let active_thread = {
+                let sess = session.lock().await;
+                sess.active_thread
+            };
 
             return Ok(Json(ThreadListResponse {
                 assistant_thread,
                 threads,
-                active_thread: sess.active_thread,
+                active_thread,
             }));
         }
     }
 
     // Fallback: in-memory only (no assistant thread without DB)
-    let threads: Vec<ThreadInfo> = sess
-        .threads
-        .values()
+    let sess = session.lock().await;
+    let mut sorted_threads: Vec<_> = sess.threads.values().collect();
+    sorted_threads.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    let threads: Vec<ThreadInfo> = sorted_threads
+        .into_iter()
         .map(|t| ThreadInfo {
             id: t.id,
             state: format!("{:?}", t.state),
@@ -482,57 +544,71 @@ pub async fn chat_threads_handler(
             updated_at: t.updated_at.to_rfc3339(),
             title: None,
             thread_type: None,
+            channel: Some("gateway".to_string()),
         })
         .collect();
+
+    let active_thread = sess.active_thread;
+    drop(sess); // Explicit drop to release lock
 
     Ok(Json(ThreadListResponse {
         assistant_thread: None,
         threads,
-        active_thread: sess.active_thread,
+        active_thread,
     }))
 }
 
 pub async fn chat_new_thread_handler(
     State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(identity): AuthenticatedUser,
 ) -> Result<Json<ThreadInfo>, (StatusCode, String)> {
     let session_manager = state.session_manager.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Session manager not available".to_string(),
     ))?;
 
-    let session = session_manager.get_or_create_session(&state.user_id).await;
-    let mut sess = session.lock().await;
-    let thread = sess.create_thread();
-    let thread_id = thread.id;
-    let info = ThreadInfo {
-        id: thread.id,
-        state: format!("{:?}", thread.state),
-        turn_count: thread.turns.len(),
-        created_at: thread.created_at.to_rfc3339(),
-        updated_at: thread.updated_at.to_rfc3339(),
-        title: None,
-        thread_type: Some("thread".to_string()),
+    let session = session_manager
+        .get_or_create_session(&identity.user_id)
+        .await;
+    let (thread_id, info) = {
+        let mut sess = session.lock().await;
+        let thread = sess.create_thread();
+        let id = thread.id;
+        let info = ThreadInfo {
+            id: thread.id,
+            state: format!("{:?}", thread.state),
+            turn_count: thread.turns.len(),
+            created_at: thread.created_at.to_rfc3339(),
+            updated_at: thread.updated_at.to_rfc3339(),
+            title: None,
+            thread_type: Some("thread".to_string()),
+            channel: Some("gateway".to_string()),
+        };
+        (id, info)
     };
 
-    // Persist the empty conversation row with thread_type metadata
+    // Persist the empty conversation row with thread_type metadata synchronously
+    // so that the subsequent loadThreads() call from the frontend sees it.
     if let Some(ref store) = state.store {
-        let store = Arc::clone(store);
-        let user_id = state.user_id.clone();
-        tokio::spawn(async move {
-            if let Err(e) = store
-                .ensure_conversation(thread_id, "gateway", &user_id, None)
-                .await
-            {
-                tracing::warn!("Failed to persist new thread: {}", e);
-            }
-            let metadata_val = serde_json::json!("thread");
-            if let Err(e) = store
-                .update_conversation_metadata_field(thread_id, "thread_type", &metadata_val)
-                .await
-            {
-                tracing::warn!("Failed to set thread_type metadata: {}", e);
-            }
-        });
+        match store
+            .ensure_conversation(thread_id, "gateway", &identity.user_id, None)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => tracing::warn!(
+                user = %identity.user_id,
+                thread_id = %thread_id,
+                "Skipped persisting new thread due to ownership/channel conflict"
+            ),
+            Err(e) => tracing::warn!("Failed to persist new thread: {}", e),
+        }
+        let metadata_val = serde_json::json!("thread");
+        if let Err(e) = store
+            .update_conversation_metadata_field(thread_id, "thread_type", &metadata_val)
+            .await
+        {
+            tracing::warn!("Failed to set thread_type metadata: {}", e);
+        }
     }
 
     Ok(Json(info))
