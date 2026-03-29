@@ -1270,24 +1270,21 @@ impl ExtensionManager {
         Self::validate_extension_name(name)?;
 
         // If we have a registry entry, use it (prefer kind_hint to resolve collisions)
-        if let Some(entry) = self.registry.get_with_kind(name, kind_hint).await {
-            return self.install_from_entry(&entry, user_id).await.map_err(|e| {
+        let mut result = if let Some(entry) = self.registry.get_with_kind(name, kind_hint).await {
+            self.install_from_entry(&entry, user_id).await.map_err(|e| {
                 tracing::error!(extension = %name, error = %e, "Extension install failed");
                 e
-            });
-        }
-
-        // If a URL was provided, determine kind and install
-        if let Some(url) = url {
+            })?
+        } else if let Some(url) = url {
+            // If a URL was provided, determine kind and install
             let kind = kind_hint.unwrap_or_else(|| infer_kind_from_url(url));
-            return match kind {
+            match kind {
                 ExtensionKind::McpServer => self.install_mcp_from_url(name, url, user_id).await,
                 ExtensionKind::WasmTool => self.install_wasm_tool_from_url(name, url).await,
                 ExtensionKind::WasmChannel => {
                     self.install_wasm_channel_from_url(name, url, None).await
                 }
                 ExtensionKind::ChannelRelay => {
-                    // ChannelRelay extensions are installed from registry, not by URL
                     Err(ExtensionError::InstallFailed(
                         "Channel relay extensions cannot be installed by URL".to_string(),
                     ))
@@ -1297,15 +1294,37 @@ impl ExtensionManager {
                 let sanitized = sanitize_url_for_logging(url);
                 tracing::error!(extension = %name, url = %sanitized, error = %e, "Extension install from URL failed");
                 e
-            });
+            })?
+        } else {
+            let err = ExtensionError::NotFound(format!(
+                "'{}' not found in registry. Try searching with discover:true or provide a URL.",
+                name
+            ));
+            tracing::warn!(extension = %name, "Extension not found in registry");
+            return Err(err);
+        };
+
+        // Post-install: auto-activate WASM tools if saved secrets already satisfy
+        // requirements (e.g. reinstall after remove preserves secrets).
+        if result.kind == ExtensionKind::WasmTool {
+            let auth_state = self.check_tool_auth_status(name, user_id).await;
+            if matches!(auth_state, ToolAuthState::Ready | ToolAuthState::NoAuth) {
+                match self.activate_wasm_tool(name, user_id).await {
+                    Ok(_) => {
+                        tracing::info!(extension = %name, "Auto-activated after install (saved secrets present)");
+                        result.message = format!(
+                            "WASM tool '{}' installed and activated (saved credentials applied).",
+                            name
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(extension = %name, error = %e, "Post-install auto-activation failed");
+                    }
+                }
+            }
         }
 
-        let err = ExtensionError::NotFound(format!(
-            "'{}' not found in registry. Try searching with discover:true or provide a URL.",
-            name
-        ));
-        tracing::warn!(extension = %name, "Extension not found in registry");
-        Err(err)
+        Ok(result)
     }
 
     /// Check auth status for an installed extension.

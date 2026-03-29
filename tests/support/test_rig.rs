@@ -528,6 +528,12 @@ impl TestRigBuilder {
         let _ = std::fs::create_dir_all(&skills_dir);
         let _ = std::fs::create_dir_all(&installed_skills_dir);
         let mut config = Config::for_testing(db_path, skills_dir, installed_skills_dir);
+        // Align owner_id with TestChannel's default user_id ("test-user") so
+        // that tenant_ctx() reuses the owner workspace instead of creating a
+        // per-user workspace.  A fresh per-user workspace triggers seed_if_empty
+        // → bootstrap_pending → bootstrap greeting, which steals response slot #1
+        // and breaks response counting in every trace-replay test.
+        config.owner_id = "test-user".to_string();
         config.agent.max_tool_iterations = max_tool_iterations;
         config.safety.injection_check_enabled = injection_check;
         config.skills.enabled = enable_skills;

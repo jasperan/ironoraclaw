@@ -116,7 +116,9 @@ pub struct RoutineEngine {
     tools: Arc<ToolRegistry>,
     /// Safety layer for tool output sanitization.
     safety: Arc<SafetyLayer>,
-    /// Sandbox readiness state for full-job dispatch.
+    /// Sandbox readiness state — retained in the public constructor API but
+    /// no longer gating full-job dispatch (jobs route through the scheduler).
+    #[allow(dead_code)]
     sandbox_readiness: SandboxReadiness,
     /// Timestamp when this engine instance was created. Used by
     /// `sync_dispatched_runs` to distinguish orphaned runs (from a previous
@@ -804,7 +806,7 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-            sandbox_readiness: self.sandbox_readiness,
+
         };
 
         tokio::spawn(async move {
@@ -889,7 +891,7 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-            sandbox_readiness: self.sandbox_readiness,
+
         };
 
         tokio::spawn(async move {
@@ -943,7 +945,7 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-            sandbox_readiness: self.sandbox_readiness,
+
         };
 
         // Record the run in DB, then spawn execution
@@ -1081,7 +1083,6 @@ struct EngineContext {
     extension_manager: Option<Arc<ExtensionManager>>,
     tools: Arc<ToolRegistry>,
     safety: Arc<SafetyLayer>,
-    sandbox_readiness: SandboxReadiness,
 }
 
 /// Execute a routine run. Handles both lightweight and full_job modes.
@@ -1256,23 +1257,10 @@ async fn execute_full_job(
     run: &RoutineRun,
     execution: &FullJobExecutionConfig<'_>,
 ) -> Result<(RunStatus, Option<String>, Option<i32>), RoutineError> {
-    match ctx.sandbox_readiness {
-        SandboxReadiness::Available => {}
-        SandboxReadiness::DisabledByConfig => {
-            return Err(RoutineError::JobDispatchFailed {
-                reason: "Sandboxing is disabled (SANDBOX_ENABLED=false). \
-                         Full-job routines require sandbox."
-                    .to_string(),
-            });
-        }
-        SandboxReadiness::DockerUnavailable => {
-            return Err(RoutineError::JobDispatchFailed {
-                reason: "Sandbox is enabled but Docker is not available. \
-                         Install Docker or set SANDBOX_ENABLED=false."
-                    .to_string(),
-            });
-        }
-    }
+    // Full-job routines dispatch through the scheduler like regular /job
+    // commands — the scheduler handles execution (sandboxed or otherwise).
+    // No Docker/sandbox gate here: the job worker resolves execution mode
+    // at runtime.
 
     let scheduler = ctx
         .scheduler
