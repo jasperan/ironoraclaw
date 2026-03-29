@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IronOraClaw — Oracle AI Database-Powered Secure Personal AI Assistant</title>
+
+    <!-- Fonts: Clash Display (display) + Satoshi (body) from Fontshare -->
+    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=clash-display@200,300,400,500,600,700&f[]=satoshi@300,400,500,700&f[]=jet-brains-mono@400&display=swap">
+
+    <style>
+        /* ===========================================
+           CSS CUSTOM PROPERTIES (IRON + ORACLE THEME)
+           =========================================== */
+        :root {
+            /* Oracle red + iron/rust palette on deep navy */
+            --bg-primary: #080c14;
+            --bg-secondary: #0e1420;
+            --bg-card: #111827;
+            --text-primary: #e8eaf0;
+            --text-secondary: #7a8599;
+            --text-muted: #4a5568;
+            --accent-oracle: #F80000;
+            --accent-rust: #DEA584;
+            --accent-iron: #8b9cc2;
+            --accent-glow: rgba(248, 0, 0, 0.15);
+            --accent-rust-glow: rgba(222, 165, 132, 0.12);
+            --accent-cyan: #38bdf8;
+            --accent-green: #34d399;
+            --accent-amber: #fbbf24;
+            --border-subtle: rgba(139, 156, 194, 0.1);
+            --border-accent: rgba(248, 0, 0, 0.3);
+
+            /* Typography — MUST use clamp() */
+            --font-display: 'Clash Display', sans-serif;
+            --font-body: 'Satoshi', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --title-size: clamp(2rem, 5.5vw, 4.5rem);
+            --h2-size: clamp(1.4rem, 3.5vw, 2.8rem);
+            --h3-size: clamp(1rem, 2.2vw, 1.5rem);
+            --body-size: clamp(0.75rem, 1.3vw, 1.05rem);
+            --small-size: clamp(0.65rem, 1vw, 0.85rem);
+            --mono-size: clamp(0.6rem, 0.9vw, 0.8rem);
+
+            /* Spacing */
+            --slide-padding: clamp(1.5rem, 5vw, 5rem);
+            --content-gap: clamp(0.75rem, 2vw, 2rem);
+            --element-gap: clamp(0.25rem, 1vw, 1rem);
+
+            /* Animation */
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+            --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+            --duration-normal: 0.6s;
+            --duration-slow: 1s;
+        }
+
+        /* ===========================================
+           BASE STYLES
+           =========================================== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===========================================
+           VIEWPORT FITTING: MANDATORY BASE STYLES
+           =========================================== */
+        html, body {
+            height: 100%;
+            overflow-x: hidden;
+        }
+
+        html {
+            scroll-snap-type: y mandatory;
+            scroll-behavior: smooth;
+        }
+
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            scroll-snap-align: start;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .slide-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            max-height: 100%;
+            overflow: hidden;
+            padding: var(--slide-padding);
+        }
+
+        .card, .container, .content-box {
+            max-width: min(90vw, 1000px);
+            max-height: min(80vh, 700px);
+        }
+
+        .feature-list, .bullet-list {
+            gap: clamp(0.4rem, 1vh, 1rem);
+        }
+
+        .feature-list li, .bullet-list li {
+            font-size: var(--body-size);
+            line-height: 1.4;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+            gap: clamp(0.5rem, 1.5vw, 1rem);
+        }
+
+        img, .image-container {
+            max-width: 100%;
+            max-height: min(50vh, 400px);
+            object-fit: contain;
+        }
+
+        /* Short viewports */
+        @media (max-height: 700px) {
+            :root {
+                --slide-padding: clamp(0.75rem, 3vw, 2rem);
+                --content-gap: clamp(0.4rem, 1.5vw, 1rem);
+                --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
+                --h2-size: clamp(1rem, 3vw, 1.75rem);
+            }
+        }
+
+        @media (max-height: 600px) {
+            :root {
+                --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem);
+                --content-gap: clamp(0.3rem, 1vw, 0.75rem);
+                --title-size: clamp(1.1rem, 4vw, 2rem);
+                --body-size: clamp(0.7rem, 1.2vw, 0.95rem);
+            }
+            .nav-dots, .keyboard-hint, .decorative { display: none; }
+        }
+
+        @media (max-height: 500px) {
+            :root {
+                --slide-padding: clamp(0.4rem, 2vw, 1rem);
+                --title-size: clamp(1rem, 3.5vw, 1.5rem);
+                --h2-size: clamp(0.9rem, 2.5vw, 1.25rem);
+                --body-size: clamp(0.65rem, 1vw, 0.85rem);
+            }
+        }
+
+        @media (max-width: 600px) {
+            :root { --title-size: clamp(1.25rem, 7vw, 2.5rem); }
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.2s !important;
+            }
+            html { scroll-behavior: auto; }
+        }
+
+        /* ===========================================
+           SLIDE NUMBERING
+           =========================================== */
+        .slide-number {
+            position: absolute;
+            top: clamp(1rem, 2.5vw, 2rem);
+            right: clamp(1rem, 3vw, 2.5rem);
+            font-family: var(--font-mono);
+            font-size: var(--small-size);
+            color: var(--text-muted);
+            letter-spacing: 0.1em;
+            z-index: 5;
+        }
+
+        /* ===========================================
+           ANIMATIONS
+           =========================================== */
+        .reveal {
+            opacity: 0;
+            transform: translateY(25px);
+            transition: opacity var(--duration-normal) var(--ease-out-expo),
+                        transform var(--duration-normal) var(--ease-out-expo);
+        }
+        .reveal-left {
+            opacity: 0;
+            transform: translateX(-40px);
+            transition: opacity var(--duration-normal) var(--ease-out-expo),
+                        transform var(--duration-normal) var(--ease-out-expo);
+        }
+        .reveal-scale {
+            opacity: 0;
+            transform: scale(0.92);
+            transition: opacity var(--duration-normal) var(--ease-out-expo),
+                        transform var(--duration-normal) var(--ease-out-expo);
+        }
+        .slide.visible .reveal,
+        .slide.visible .reveal-left,
+        .slide.visible .reveal-scale {
+            opacity: 1;
+            transform: translateY(0) translateX(0) scale(1);
+        }
+        .reveal:nth-child(1) { transition-delay: 0.05s; }
+        .reveal:nth-child(2) { transition-delay: 0.12s; }
+        .reveal:nth-child(3) { transition-delay: 0.2s; }
+        .reveal:nth-child(4) { transition-delay: 0.28s; }
+        .reveal:nth-child(5) { transition-delay: 0.36s; }
+        .reveal:nth-child(6) { transition-delay: 0.44s; }
+
+        /* ===========================================
+           BACKGROUND EFFECTS
+           =========================================== */
+        .gradient-mesh {
+            background:
+                radial-gradient(ellipse at 15% 85%, rgba(248, 0, 0, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 15%, rgba(222, 165, 132, 0.05) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(139, 156, 194, 0.03) 0%, transparent 60%),
+                var(--bg-primary);
+        }
+        .grid-bg::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(139, 156, 194, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(139, 156, 194, 0.04) 1px, transparent 1px);
+            background-size: clamp(30px, 4vw, 50px) clamp(30px, 4vw, 50px);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ===========================================
+           PROGRESS BAR
+           =========================================== */
+        .progress-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-oracle), var(--accent-rust));
+            z-index: 1000;
+            transition: width 0.3s ease;
+        }
+
+        /* ===========================================
+           NAV DOTS
+           =========================================== */
+        .nav-dots {
+            position: fixed;
+            right: clamp(0.5rem, 1.5vw, 1.25rem);
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: clamp(4px, 0.6vh, 8px);
+            z-index: 100;
+        }
+        .nav-dot {
+            width: clamp(4px, 0.4vw, 6px);
+            height: clamp(4px, 0.4vw, 6px);
+            border-radius: 50%;
+            background: var(--text-muted);
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: 0;
+        }
+        .nav-dot.active {
+            background: var(--accent-oracle);
+            box-shadow: 0 0 8px var(--accent-glow);
+            transform: scale(1.5);
+        }
+
+        /* ===========================================
+           TYPOGRAPHY
+           =========================================== */
+        h1 {
+            font-family: var(--font-display);
+            font-size: var(--title-size);
+            font-weight: 600;
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+        }
+        h2 {
+            font-family: var(--font-display);
+            font-size: var(--h2-size);
+            font-weight: 600;
+            line-height: 1.15;
+            letter-spacing: -0.015em;
+        }
+        h3 {
+            font-family: var(--font-display);
+            font-size: var(--h3-size);
+            font-weight: 500;
+            line-height: 1.25;
+        }
+        p, li {
+            font-size: var(--body-size);
+            line-height: 1.55;
+            color: var(--text-secondary);
+        }
+        .mono {
+            font-family: var(--font-mono);
+            font-size: var(--mono-size);
+        }
+        .accent-oracle { color: var(--accent-oracle); }
+        .accent-rust { color: var(--accent-rust); }
+        .accent-iron { color: var(--accent-iron); }
+        .accent-cyan { color: var(--accent-cyan); }
+        .accent-green { color: var(--accent-green); }
+        .accent-amber { color: var(--accent-amber); }
+        .tag {
+            display: inline-block;
+            padding: clamp(2px, 0.3vw, 4px) clamp(6px, 0.8vw, 12px);
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: var(--small-size);
+            background: var(--accent-glow);
+            color: var(--accent-oracle);
+            border: 1px solid var(--border-accent);
+        }
+        .tag-rust {
+            background: var(--accent-rust-glow);
+            color: var(--accent-rust);
+            border-color: rgba(222, 165, 132, 0.3);
+        }
+
+        /* ===========================================
+           LAYOUT COMPONENTS
+           =========================================== */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--content-gap);
+            align-items: start;
+            max-height: min(75vh, 600px);
+        }
+        @media (max-width: 700px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: clamp(6px, 0.6vw, 10px);
+            padding: clamp(0.6rem, 1.5vw, 1.2rem);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .feature-card:hover {
+            border-color: var(--border-accent);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+        .feature-card h3 {
+            margin-bottom: clamp(0.2rem, 0.5vw, 0.4rem);
+        }
+        .feature-card p {
+            font-size: var(--small-size);
+        }
+        .card-icon {
+            font-size: clamp(1rem, 1.8vw, 1.5rem);
+            margin-bottom: clamp(0.2rem, 0.4vw, 0.5rem);
+        }
+
+        .stat-row {
+            display: flex;
+            gap: clamp(1rem, 3vw, 3rem);
+            flex-wrap: wrap;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-value {
+            font-family: var(--font-display);
+            font-size: clamp(1.5rem, 3.5vw, 3rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1;
+        }
+        .stat-label {
+            font-size: var(--small-size);
+            color: var(--text-muted);
+            margin-top: clamp(2px, 0.3vw, 6px);
+        }
+
+        .code-block {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: clamp(0.4rem, 1vw, 0.8rem) clamp(0.6rem, 1.2vw, 1rem);
+            font-family: var(--font-mono);
+            font-size: var(--mono-size);
+            color: var(--text-secondary);
+            line-height: 1.5;
+            overflow: hidden;
+        }
+        .code-block .keyword { color: var(--accent-oracle); }
+        .code-block .type { color: var(--accent-rust); }
+        .code-block .string { color: var(--accent-green); }
+        .code-block .comment { color: var(--text-muted); font-style: italic; }
+        .code-block .func { color: var(--accent-cyan); }
+
+        .flow-diagram {
+            display: flex;
+            align-items: center;
+            gap: clamp(0.3rem, 0.8vw, 0.8rem);
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .flow-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: clamp(0.3rem, 0.6vw, 0.6rem) clamp(0.5rem, 1vw, 1rem);
+            font-family: var(--font-mono);
+            font-size: var(--small-size);
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+        .flow-box.active {
+            border-color: var(--accent-oracle);
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+        .flow-arrow {
+            color: var(--text-muted);
+            font-size: var(--small-size);
+        }
+
+        .separator {
+            width: clamp(30px, 4vw, 60px);
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-oracle), transparent);
+            margin: clamp(0.3rem, 0.8vw, 0.8rem) 0;
+        }
+
+        .subtitle {
+            font-size: clamp(0.9rem, 1.8vw, 1.2rem);
+            color: var(--text-secondary);
+            max-width: min(80vw, 700px);
+        }
+
+        /* Section label for slide categories */
+        .section-label {
+            font-family: var(--font-mono);
+            font-size: var(--small-size);
+            color: var(--accent-oracle);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: clamp(0.3rem, 0.6vw, 0.6rem);
+        }
+
+        /* Trait/interface boxes */
+        .trait-box {
+            background: rgba(248, 0, 0, 0.05);
+            border-left: 2px solid var(--accent-oracle);
+            padding: clamp(0.4rem, 0.8vw, 0.7rem) clamp(0.6rem, 1vw, 1rem);
+            border-radius: 0 6px 6px 0;
+            margin-bottom: clamp(0.2rem, 0.4vw, 0.4rem);
+        }
+        .trait-box h3 {
+            font-family: var(--font-mono);
+            color: var(--accent-rust);
+            font-size: var(--small-size);
+            font-weight: 500;
+        }
+        .trait-box p {
+            font-size: var(--small-size);
+            margin-top: 2px;
+        }
+
+        /* List with custom markers */
+        .check-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: clamp(0.2rem, 0.5vw, 0.5rem);
+        }
+        .check-list li::before {
+            content: '▸';
+            color: var(--accent-oracle);
+            margin-right: clamp(4px, 0.4vw, 8px);
+            font-weight: 700;
+        }
+
+        /* Timeline */
+        .pipeline-steps {
+            display: flex;
+            flex-direction: column;
+            gap: clamp(0.2rem, 0.5vw, 0.5rem);
+            position: relative;
+            padding-left: clamp(1rem, 2vw, 2rem);
+        }
+        .pipeline-steps::before {
+            content: '';
+            position: absolute;
+            left: clamp(3px, 0.3vw, 5px);
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(180deg, var(--accent-oracle), var(--accent-rust), transparent);
+        }
+        .pipeline-step {
+            position: relative;
+        }
+        .pipeline-step::before {
+            content: '';
+            position: absolute;
+            left: calc(-1 * clamp(1rem, 2vw, 2rem) + clamp(1px, 0.15vw, 3px));
+            top: clamp(4px, 0.5vw, 7px);
+            width: clamp(6px, 0.5vw, 8px);
+            height: clamp(6px, 0.5vw, 8px);
+            border-radius: 50%;
+            background: var(--accent-oracle);
+            box-shadow: 0 0 6px var(--accent-glow);
+        }
+
+        /* Glow accent line at bottom of certain slides */
+        .glow-line {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent-oracle), transparent);
+            opacity: 0.3;
+        }
+
+        /* ===========================================
+           TITLE SLIDE SPECIAL STYLES
+           =========================================== */
+        .title-slide {
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .title-slide .slide-content {
+            align-items: center;
+        }
+        .title-badge {
+            display: flex;
+            gap: clamp(0.3rem, 0.6vw, 0.6rem);
+            margin-bottom: clamp(0.5rem, 1.5vw, 1.5rem);
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .title-separator {
+            width: clamp(40px, 6vw, 80px);
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-oracle), var(--accent-rust));
+            margin: clamp(0.5rem, 1vw, 1rem) 0;
+            border-radius: 2px;
+        }
+
+        /* Iron shield glow behind title */
+        .shield-glow {
+            position: absolute;
+            width: clamp(200px, 40vw, 500px);
+            height: clamp(200px, 40vw, 500px);
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(248, 0, 0, 0.08) 0%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Animated hex grid for title */
+        @keyframes hexPulse {
+            0%, 100% { opacity: 0.03; }
+            50% { opacity: 0.08; }
+        }
+        .hex-grid {
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(30deg, var(--accent-iron) 12%, transparent 12.5%, transparent 87%, var(--accent-iron) 87.5%, var(--accent-iron)),
+                linear-gradient(150deg, var(--accent-iron) 12%, transparent 12.5%, transparent 87%, var(--accent-iron) 87.5%, var(--accent-iron)),
+                linear-gradient(30deg, var(--accent-iron) 12%, transparent 12.5%, transparent 87%, var(--accent-iron) 87.5%, var(--accent-iron)),
+                linear-gradient(150deg, var(--accent-iron) 12%, transparent 12.5%, transparent 87%, var(--accent-iron) 87.5%, var(--accent-iron)),
+                linear-gradient(60deg, rgba(139,156,194,0.05) 25%, transparent 25.5%, transparent 75%, rgba(139,156,194,0.05) 75%),
+                linear-gradient(60deg, rgba(139,156,194,0.05) 25%, transparent 25.5%, transparent 75%, rgba(139,156,194,0.05) 75%);
+            background-size: 80px 140px;
+            background-position: 0 0, 0 0, 40px 70px, 40px 70px, 0 0, 40px 70px;
+            animation: hexPulse 6s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ===========================================
+           SECTION DIVIDER SLIDES
+           =========================================== */
+        .section-slide {
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .section-slide .slide-content {
+            padding-left: clamp(3rem, 10vw, 10rem);
+        }
+        .section-num {
+            font-family: var(--font-display);
+            font-size: clamp(3rem, 8vw, 8rem);
+            font-weight: 700;
+            color: rgba(248, 0, 0, 0.12);
+            line-height: 1;
+            position: absolute;
+            top: clamp(1rem, 3vw, 3rem);
+            left: clamp(1rem, 3vw, 3rem);
+        }
+
+        /* ===========================================
+           CLOSING SLIDE
+           =========================================== */
+        .closing-slide .links {
+            display: flex;
+            gap: clamp(0.5rem, 1.5vw, 1.5rem);
+            flex-wrap: wrap;
+            margin-top: clamp(0.5rem, 1vw, 1rem);
+        }
+        .link-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: clamp(4px, 0.3vw, 6px);
+            padding: clamp(4px, 0.4vw, 6px) clamp(10px, 1vw, 16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            font-family: var(--font-mono);
+            font-size: var(--small-size);
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: border-color 0.3s, color 0.3s;
+        }
+        .link-pill:hover {
+            border-color: var(--accent-oracle);
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+
+<!-- Progress Bar -->
+<div class="progress-bar" id="progressBar"></div>
+
+<!-- Navigation Dots -->
+<nav class="nav-dots" id="navDots" aria-label="Slide navigation"></nav>
+
+<!-- ===================================================
+     SLIDE 01: TITLE
+     =================================================== -->
+<section class="slide title-slide gradient-mesh grid-bg" data-title="IronOraClaw">
+    <div class="hex-grid"></div>
+    <div class="shield-glow"></div>
+    <div class="slide-content" style="z-index: 1;">
+        <div class="title-badge reveal">
+            <span class="tag">Rust 1.92+</span>
+            <span class="tag" style="background: rgba(222,165,132,0.12); color: var(--accent-rust); border-color: rgba(222,165,132,0.3);">Oracle AI Database</span>
+            <span class="tag" style="background: rgba(56,189,248,0.1); color: var(--accent-cyan); border-color: rgba(56,189,248,0.3);">226K LOC</span>
+        </div>
+        <h1 class="reveal">Iron<span class="accent-oracle">Ora</span>Claw</h1>
+        <div class="title-separator reveal"></div>
+        <p class="subtitle reveal">Oracle AI Database-powered secure personal AI assistant.<br>Iron-clad security. Oracle-grade persistence.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 02: THE PITCH
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="The Pitch">
+    <span class="slide-number">02</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Why this exists</p>
+        <h2 class="reveal">Every byte lives in <span class="accent-oracle">Oracle</span></h2>
+        <div class="separator reveal"></div>
+        <p class="subtitle reveal" style="margin-bottom: var(--content-gap);">A fork of IronClaw that replaces ALL storage backends with Oracle AI Database. Memory, conversations, job state, embeddings. No PostgreSQL, no SQLite, no files.</p>
+        <div class="stat-row reveal">
+            <div class="stat">
+                <div class="stat-value accent-oracle">346</div>
+                <div class="stat-label">Rust source files</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value accent-rust">226K</div>
+                <div class="stat-label">Lines of code</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value accent-iron">21</div>
+                <div class="stat-label">Config subsystems</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value accent-cyan">20+</div>
+                <div class="stat-label">Built-in tools</div>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 03: ORACLE ADVANTAGE
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Oracle Advantage">
+    <span class="slide-number">03</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Oracle AI Database</p>
+        <h2 class="reveal">Why <span class="accent-oracle">Oracle</span>?</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <ul class="check-list reveal">
+                    <li><strong class="accent-rust">In-Database ONNX Embeddings</strong><br><span style="color:var(--text-muted)">384-dim vectors via VECTOR_EMBEDDING(). Zero API calls.</span></li>
+                    <li><strong class="accent-rust">AI Vector Search</strong><br><span style="color:var(--text-muted)">Semantic recall with VECTOR_DISTANCE() + COSINE.</span></li>
+                    <li><strong class="accent-rust">ACID Transactions</strong><br><span style="color:var(--text-muted)">No data loss on crash, ever.</span></li>
+                </ul>
+            </div>
+            <div>
+                <ul class="check-list reveal">
+                    <li><strong class="accent-rust">Multi-Agent Isolation</strong><br><span style="color:var(--text-muted)">Each agent namespaced via agent_id.</span></li>
+                    <li><strong class="accent-rust">Enterprise-Grade</strong><br><span style="color:var(--text-muted)">Connection pooling, auto-indexing, audit trails.</span></li>
+                    <li><strong class="accent-rust">26ai Free Tier</strong><br><span style="color:var(--text-muted)">Full AI Database features, zero cost.</span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 04: ARCHITECTURE OVERVIEW
+     =================================================== -->
+<section class="slide gradient-mesh grid-bg" data-title="Architecture">
+    <span class="slide-number">04</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Architecture</p>
+        <h2 class="reveal">System Overview</h2>
+        <div class="separator reveal"></div>
+        <div class="flow-diagram reveal" style="margin: var(--content-gap) 0;">
+            <div class="flow-box">Channels</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box active">Agent Core</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">LLM Providers</div>
+        </div>
+        <div class="flow-diagram reveal" style="margin-bottom: var(--content-gap);">
+            <div class="flow-box">Tools</div>
+            <span class="flow-arrow">↔</span>
+            <div class="flow-box active">Agent Core</div>
+            <span class="flow-arrow">↔</span>
+            <div class="flow-box">Oracle DB</div>
+        </div>
+        <div class="flow-diagram reveal">
+            <div class="flow-box">Safety Layer</div>
+            <span class="flow-arrow">|</span>
+            <div class="flow-box">Sandbox</div>
+            <span class="flow-arrow">|</span>
+            <div class="flow-box">Hooks</div>
+            <span class="flow-arrow">|</span>
+            <div class="flow-box">Secrets</div>
+            <span class="flow-arrow">|</span>
+            <div class="flow-box">Skills</div>
+        </div>
+        <p class="reveal" style="margin-top:var(--content-gap); font-size:var(--small-size); color:var(--text-muted);">All I/O is async with Tokio. Arc&lt;T&gt; for shared state, RwLock for concurrent access. 10 core trait abstractions drive extensibility.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 05: SECTION — AGENT CORE
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="Agent Core">
+    <span class="section-num reveal">01</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Agent <span class="accent-oracle">Core</span></h1>
+        <p class="subtitle reveal">The brain. Dispatcher, scheduler, sessions, self-repair.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 06: AGENT LOOP
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Agent Loop">
+    <span class="slide-number">06</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Agent Core</p>
+        <h2 class="reveal">The Agentic Loop</h2>
+        <div class="separator reveal"></div>
+        <div class="pipeline-steps reveal" style="margin-top: var(--content-gap);">
+            <div class="pipeline-step">
+                <h3>Inbound Message</h3>
+                <p style="font-size:var(--small-size)">Channel delivers IncomingMessage via merged stream</p>
+            </div>
+            <div class="pipeline-step">
+                <h3>Safety Gate</h3>
+                <p style="font-size:var(--small-size)">Prompt injection scan, validation, policy check</p>
+            </div>
+            <div class="pipeline-step">
+                <h3>Dispatcher → LLM</h3>
+                <p style="font-size:var(--small-size)">Context assembly, tool schemas, provider routing</p>
+            </div>
+            <div class="pipeline-step">
+                <h3>Tool Execution</h3>
+                <p style="font-size:var(--small-size)">Approval gate → sandbox → execute → leak scan</p>
+            </div>
+            <div class="pipeline-step">
+                <h3>Response Delivery</h3>
+                <p style="font-size:var(--small-size)">Outbound hooks → channel → user. Loop continues until done.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 07: JOB STATE MACHINE
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Job State Machine">
+    <span class="slide-number">07</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Agent Core</p>
+        <h2 class="reveal">Job State Machine</h2>
+        <div class="separator reveal"></div>
+        <div class="flow-diagram reveal" style="margin: var(--content-gap) 0;">
+            <div class="flow-box">Pending</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box active">InProgress</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">Completed</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">Submitted</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box" style="border-color: var(--accent-green);">Accepted</div>
+        </div>
+        <div class="flow-diagram reveal" style="margin-bottom: var(--content-gap);">
+            <div class="flow-box active">InProgress</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box" style="border-color: var(--accent-amber);">Stuck</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box active">InProgress</div>
+            <span class="flow-arrow" style="margin: 0 clamp(0.5rem, 1vw, 1rem);">or</span>
+            <div class="flow-box" style="border-color: #ef4444;">Failed</div>
+        </div>
+        <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted);">Self-repair: stuck jobs detected automatically, retried with fresh context. Parallel jobs run in isolated contexts with per-job bearer tokens.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 08: SECTION — CHANNELS
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="Channels">
+    <span class="section-num reveal">02</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Multi-Channel <span class="accent-oracle">Access</span></h1>
+        <p class="subtitle reveal">Talk to your agent from anywhere. CLI, web, webhooks, messaging apps.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 09: CHANNELS DETAIL
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Channel Types">
+    <span class="slide-number">09</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Channels</p>
+        <h2 class="reveal">6 Channel Types</h2>
+        <div class="separator reveal"></div>
+        <div class="grid reveal" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); margin-top: var(--content-gap);">
+            <div class="feature-card">
+                <div class="card-icon">⌨️</div>
+                <h3>CLI / TUI</h3>
+                <p>Full terminal UI with Ratatui. Keyboard-driven, syntax highlighting.</p>
+            </div>
+            <div class="feature-card">
+                <div class="card-icon">🌐</div>
+                <h3>Web Gateway</h3>
+                <p>Browser UI with WebSocket + SSE streaming, auth layer.</p>
+            </div>
+            <div class="feature-card">
+                <div class="card-icon">🔗</div>
+                <h3>HTTP Webhooks</h3>
+                <p>Axum server with secret validation. External service integration.</p>
+            </div>
+            <div class="feature-card">
+                <div class="card-icon">📦</div>
+                <h3>WASM Channels</h3>
+                <p>Telegram, Discord, Slack bundled as WASM modules.</p>
+            </div>
+            <div class="feature-card">
+                <div class="card-icon">📡</div>
+                <h3>Signal</h3>
+                <p>End-to-end encrypted messaging via Signal protocol.</p>
+            </div>
+            <div class="feature-card">
+                <div class="card-icon">🔬</div>
+                <h3>REPL</h3>
+                <p>Simple read-eval-print loop for testing and debugging.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 10: CHANNEL TRAIT
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Channel Trait">
+    <span class="slide-number">10</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Channels</p>
+        <h2 class="reveal">The Channel Trait</h2>
+        <div class="separator reveal"></div>
+        <div class="code-block reveal" style="margin-top: var(--content-gap);">
+            <span class="keyword">pub trait</span> <span class="type">Channel</span>: <span class="type">Send</span> + <span class="type">Sync</span> {<br>
+            &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">name</span>(&amp;self) -&gt; &amp;<span class="type">str</span>;<br>
+            &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">start</span>(&amp;self) -&gt; <span class="type">Pin</span>&lt;<span class="type">Box</span>&lt;<span class="keyword">dyn</span> <span class="type">Stream</span>&lt;<span class="type">IncomingMessage</span>&gt;&gt;&gt;;<br>
+            &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">respond</span>(&amp;self, msg: <span class="type">OutgoingResponse</span>) -&gt; <span class="type">Result</span>&lt;()&gt;;<br>
+            &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">send_status</span>(&amp;self, status: <span class="type">AgentStatus</span>);<br>
+            &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">update_secrets</span>(&amp;self, secrets: <span class="type">SecretMap</span>);<br>
+            }
+        </div>
+        <p class="reveal" style="margin-top:var(--content-gap); font-size:var(--small-size); color:var(--text-muted);">ChannelManager merges all channel streams into a single async stream. Adding a new channel: implement the trait, add config, wire in app.rs.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 11: SECTION — TOOLS
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="Tools">
+    <span class="section-num reveal">03</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Tool <span class="accent-oracle">System</span></h1>
+        <p class="subtitle reveal">20+ built-in tools. WASM sandbox. MCP protocol. Dynamic generation.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 12: BUILT-IN TOOLS
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Built-in Tools">
+    <span class="slide-number">12</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Tools</p>
+        <h2 class="reveal">Built-in Arsenal</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <h3 class="reveal accent-rust" style="margin-bottom: clamp(0.2rem,0.4vw,0.4rem);">Core</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>memory_search / write / read / tree</li>
+                    <li>read_file / write_file / list_dir / apply_patch</li>
+                    <li>http / json / shell / echo / time</li>
+                    <li>html_converter / path_utils / tool_info</li>
+                </ul>
+                <h3 class="reveal accent-rust" style="margin: clamp(0.3rem,0.6vw,0.6rem) 0 clamp(0.2rem,0.3vw,0.3rem);">Image</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>image_analyze / image_edit / image_generate</li>
+                </ul>
+            </div>
+            <div>
+                <h3 class="reveal accent-rust" style="margin-bottom: clamp(0.2rem,0.4vw,0.4rem);">Jobs & Automation</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>create_job / list_jobs / job_status / cancel_job</li>
+                    <li>job_events / job_prompt</li>
+                    <li>routine management (cron / event / webhook)</li>
+                </ul>
+                <h3 class="reveal accent-rust" style="margin: clamp(0.3rem,0.6vw,0.6rem) 0 clamp(0.2rem,0.3vw,0.3rem);">Extensions</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>skill_list / search / install / remove</li>
+                    <li>extension_tools / secrets_tools</li>
+                    <li>restart / message</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 13: WASM SANDBOX
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="WASM Sandbox">
+    <span class="slide-number">13</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Tools</p>
+        <h2 class="reveal">WASM <span class="accent-oracle">Sandbox</span></h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <div class="pipeline-steps reveal">
+                    <div class="pipeline-step"><h3>Compilation</h3><p style="font-size:var(--small-size)">Wasmtime runtime with module caching</p></div>
+                    <div class="pipeline-step"><h3>Fuel Metering</h3><p style="font-size:var(--small-size)">CPU time limits per execution</p></div>
+                    <div class="pipeline-step"><h3>Memory Limits</h3><p style="font-size:var(--small-size)">Bounded linear memory allocation</p></div>
+                    <div class="pipeline-step"><h3>Network Allowlist</h3><p style="font-size:var(--small-size)">Endpoint-level domain filtering</p></div>
+                    <div class="pipeline-step"><h3>Credential Injection</h3><p style="font-size:var(--small-size)">Safe secret injection into WASM host</p></div>
+                </div>
+            </div>
+            <div>
+                <div class="code-block reveal">
+                    <span class="keyword">pub trait</span> <span class="type">Tool</span>: <span class="type">Send</span> + <span class="type">Sync</span> {<br>
+                    &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">name</span>(&amp;self) -&gt; &amp;<span class="type">str</span>;<br>
+                    &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">description</span>(&amp;self) -&gt; &amp;<span class="type">str</span>;<br>
+                    &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">schema</span>(&amp;self) -&gt; <span class="type">Value</span>;<br>
+                    &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">execute</span>(&amp;self,<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;args: <span class="type">Value</span><br>
+                    &nbsp;&nbsp;) -&gt; <span class="type">Result</span>&lt;<span class="type">ToolOutput</span>&gt;;<br>
+                    &nbsp;&nbsp;<span class="keyword">fn</span> <span class="func">requires_approval</span>() -&gt; <span class="type">bool</span>;<br>
+                    }
+                </div>
+                <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">Rate limiting per tool. Leak detection on every response. Host functions for logging, time, workspace access.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 14: MCP PROTOCOL
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="MCP Integration">
+    <span class="slide-number">14</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Tools</p>
+        <h2 class="reveal">MCP Integration</h2>
+        <div class="separator reveal"></div>
+        <p class="subtitle reveal" style="margin: var(--content-gap) 0;">Model Context Protocol support for connecting external tool servers.</p>
+        <div class="grid reveal" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));">
+            <div class="feature-card">
+                <h3 class="accent-cyan">Client</h3>
+                <p>HTTP-based MCP client with JSON-RPC transport</p>
+            </div>
+            <div class="feature-card">
+                <h3 class="accent-cyan">Factory</h3>
+                <p>Transport dispatch: stdio, HTTP, Unix socket</p>
+            </div>
+            <div class="feature-card">
+                <h3 class="accent-cyan">Sessions</h3>
+                <p>Mcp-Session-Id header, per-server state tracking</p>
+            </div>
+        </div>
+        <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">Request-response only (no streaming yet). Tools discovered from MCP servers are registered in the ToolRegistry alongside built-ins.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 15: SECTION — LLM PROVIDERS
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="LLM Providers">
+    <span class="section-num reveal">04</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">LLM <span class="accent-oracle">Providers</span></h1>
+        <p class="subtitle reveal">Swap backends without changing a line of agent code.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 16: LLM BACKENDS
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="LLM Backends">
+    <span class="slide-number">16</span>
+    <div class="slide-content">
+        <p class="section-label reveal">LLM Providers</p>
+        <h2 class="reveal">7+ Backends</h2>
+        <div class="separator reveal"></div>
+        <div class="grid reveal" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); margin-top: var(--content-gap);">
+            <div class="feature-card"><h3>NEAR AI</h3><p>Native integration</p></div>
+            <div class="feature-card"><h3>Anthropic</h3><p>Claude models</p></div>
+            <div class="feature-card"><h3>OpenAI</h3><p>GPT-4, o1, etc.</p></div>
+            <div class="feature-card"><h3>Bedrock</h3><p>AWS managed LLMs</p></div>
+            <div class="feature-card"><h3>Ollama</h3><p>Local inference</p></div>
+            <div class="feature-card"><h3>Gemini</h3><p>Google models</p></div>
+        </div>
+        <div class="two-col reveal" style="margin-top:var(--content-gap); gap: var(--element-gap);">
+            <div class="trait-box">
+                <h3>Retry + Circuit Breaker</h3>
+                <p>Provider wrappers handle transient failures</p>
+            </div>
+            <div class="trait-box">
+                <h3>Failover Chain</h3>
+                <p>Primary → secondary → tertiary fallback</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 17: SECTION — SAFETY
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="Safety">
+    <span class="section-num reveal">05</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Safety & <span class="accent-oracle">Security</span></h1>
+        <p class="subtitle reveal">Defense in depth. Every layer validates. Nothing gets through unchecked.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 18: SAFETY LAYERS
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Safety Layers">
+    <span class="slide-number">18</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Safety</p>
+        <h2 class="reveal">Defense in Depth</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <div class="pipeline-steps reveal">
+                    <div class="pipeline-step"><h3>Prompt Injection Detection</h3><p style="font-size:var(--small-size)">Pattern matching + heuristic scanning on all inbound messages</p></div>
+                    <div class="pipeline-step"><h3>Input Validation</h3><p style="font-size:var(--small-size)">Schema enforcement, size limits, content filtering</p></div>
+                    <div class="pipeline-step"><h3>Policy Enforcement</h3><p style="font-size:var(--small-size)">Per-tool approval gates, capability ceilings</p></div>
+                    <div class="pipeline-step"><h3>Leak Detection</h3><p style="font-size:var(--small-size)">Outbound responses scanned for secret material</p></div>
+                </div>
+            </div>
+            <div>
+                <div class="feature-card reveal" style="margin-bottom: var(--element-gap);">
+                    <h3 class="accent-oracle">Extracted Crate</h3>
+                    <p>ironclaw_safety lives in crates/ for reuse. Re-exported via src/safety/ shim for backward compat.</p>
+                </div>
+                <div class="code-block reveal">
+                    <span class="comment">// Safety is the first and last gate</span><br>
+                    <span class="keyword">use</span> <span class="type">ironclaw_safety</span>::<span class="type">SafetyLayer</span>;<br><br>
+                    <span class="comment">// Inbound: scan before agent sees it</span><br>
+                    safety.<span class="func">validate_input</span>(&amp;msg)?;<br><br>
+                    <span class="comment">// Outbound: scan before user sees it</span><br>
+                    safety.<span class="func">scan_response</span>(&amp;resp)?;
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 19: SECRETS & SANDBOX
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Secrets & Sandbox">
+    <span class="slide-number">19</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Safety</p>
+        <h2 class="reveal">Secrets & Sandbox</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <h3 class="reveal accent-amber" style="margin-bottom:var(--element-gap);">Secrets Management</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>AES-256-GCM encryption at rest</li>
+                    <li>HKDF key derivation per secret</li>
+                    <li>OS keychain for master key storage</li>
+                    <li>Leak scanner on every outbound response</li>
+                    <li>Safe injection into WASM host functions</li>
+                </ul>
+            </div>
+            <div>
+                <h3 class="reveal accent-amber" style="margin-bottom:var(--element-gap);">Docker Sandbox</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li><strong>ReadOnly</strong> — explore, no writes</li>
+                    <li><strong>WorkspaceWrite</strong> — build and test</li>
+                    <li><strong>FullAccess</strong> — direct execution</li>
+                    <li>Network proxy with domain allowlist</li>
+                    <li>Per-job bearer tokens via orchestrator</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 20: SECTION — PERSISTENCE
+     =================================================== -->
+<section class="slide section-slide gradient-mesh" data-title="Data">
+    <span class="section-num reveal">06</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Section</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Data & <span class="accent-oracle">Persistence</span></h1>
+        <p class="subtitle reveal">Dual-backend database. Hybrid search. Persistent memory.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 21: DATABASE
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Database">
+    <span class="slide-number">21</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Persistence</p>
+        <h2 class="reveal">Dual-Backend Database</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <div class="feature-card reveal" style="border-color: var(--accent-oracle); margin-bottom:var(--element-gap);">
+                    <h3 class="accent-oracle">Oracle AI Database</h3>
+                    <p>Primary backend. VECTOR_EMBEDDING(), VECTOR_DISTANCE(), ACID transactions, connection pooling.</p>
+                </div>
+                <div class="feature-card reveal">
+                    <h3 class="accent-cyan">libSQL / Turso</h3>
+                    <p>Lightweight fallback. FTS5 + vector search via libsql_vector_idx. Edge-compatible.</p>
+                </div>
+            </div>
+            <div>
+                <div class="code-block reveal">
+                    <span class="keyword">pub trait</span> <span class="type">Database</span>:<br>
+                    &nbsp;&nbsp;<span class="type">ConversationStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">JobStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">SandboxStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">RoutineStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">ToolFailureStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">SettingsStore</span><br>
+                    &nbsp;&nbsp;+ <span class="type">WorkspaceStore</span><br>
+                    { }
+                </div>
+                <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">7 sub-traits compose the full Database trait. All new persistence features must support both backends.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 22: WORKSPACE & MEMORY
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Workspace">
+    <span class="slide-number">22</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Persistence</p>
+        <h2 class="reveal">Workspace & Memory</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <h3 class="reveal accent-green" style="margin-bottom:var(--element-gap);">Hybrid Search</h3>
+                <div class="pipeline-steps reveal">
+                    <div class="pipeline-step"><h3>FTS5</h3><p style="font-size:var(--small-size)">Full-text keyword search</p></div>
+                    <div class="pipeline-step"><h3>Vector Search</h3><p style="font-size:var(--small-size)">Semantic similarity via embeddings</p></div>
+                    <div class="pipeline-step"><h3>RRF</h3><p style="font-size:var(--small-size)">Reciprocal Rank Fusion combines both</p></div>
+                </div>
+            </div>
+            <div>
+                <h3 class="reveal accent-green" style="margin-bottom:var(--element-gap);">Identity Files</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li><strong>AGENTS.md</strong> — agent persona definition</li>
+                    <li><strong>SOUL.md</strong> — values and behavioral guidelines</li>
+                    <li><strong>USER.md</strong> — user profile and preferences</li>
+                    <li><strong>IDENTITY.md</strong> — core identity anchor</li>
+                    <li><strong>HEARTBEAT.md</strong> — proactive execution instructions</li>
+                </ul>
+                <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">Heartbeat runs every 30min, reads instructions, acts proactively, notifies via channel.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 23: HOOKS & SKILLS
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Hooks & Skills">
+    <span class="slide-number">23</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Extensibility</p>
+        <h2 class="reveal">Hooks & Skills</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <h3 class="reveal accent-iron" style="margin-bottom:var(--element-gap);">6 Lifecycle Hooks</h3>
+                <ul class="check-list reveal" style="font-size:var(--small-size);">
+                    <li>BeforeInbound</li>
+                    <li>BeforeToolCall</li>
+                    <li>BeforeOutbound</li>
+                    <li>OnSessionStart</li>
+                    <li>OnSessionEnd</li>
+                    <li>TransformResponse</li>
+                </ul>
+                <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">Intercept at any point. Modify, block, or augment the pipeline.</p>
+            </div>
+            <div>
+                <h3 class="reveal accent-iron" style="margin-bottom:var(--element-gap);">Skills System</h3>
+                <div class="feature-card reveal" style="margin-bottom:var(--element-gap);">
+                    <h3 class="accent-green">Trusted</h3>
+                    <p>User-placed in ~/.ironclaw/skills/. Full tool access.</p>
+                </div>
+                <div class="feature-card reveal">
+                    <h3 class="accent-amber">Installed</h3>
+                    <p>From registry. Read-only tools only.</p>
+                </div>
+                <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">SKILL.md files extend the system prompt. Gating → scoring → budget → attenuation.</p>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 24: TUNNEL & DEPLOYMENT
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Tunnel & Deploy">
+    <span class="slide-number">24</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Deployment</p>
+        <h2 class="reveal">Tunnel & Workers</h2>
+        <div class="separator reveal"></div>
+        <div class="two-col" style="margin-top: var(--content-gap);">
+            <div>
+                <h3 class="reveal accent-cyan" style="margin-bottom:var(--element-gap);">Tunnel Providers</h3>
+                <div class="grid reveal" style="grid-template-columns: 1fr 1fr; gap: var(--element-gap);">
+                    <div class="feature-card"><h3>Cloudflare</h3><p>cloudflared binary</p></div>
+                    <div class="feature-card"><h3>ngrok</h3><p>Quick tunnels</p></div>
+                    <div class="feature-card"><h3>Tailscale</h3><p>Serve / Funnel modes</p></div>
+                    <div class="feature-card"><h3>Custom</h3><p>Any command with {host}/{port}</p></div>
+                </div>
+            </div>
+            <div>
+                <h3 class="reveal accent-cyan" style="margin-bottom:var(--element-gap);">Worker System</h3>
+                <div class="pipeline-steps reveal">
+                    <div class="pipeline-step"><h3>Orchestrator</h3><p style="font-size:var(--small-size)">Axum API: LLM proxy, events, job management</p></div>
+                    <div class="pipeline-step"><h3>Container Worker</h3><p style="font-size:var(--small-size)">Docker runtime with shared agentic loop</p></div>
+                    <div class="pipeline-step"><h3>Claude Bridge</h3><p style="font-size:var(--small-size)">Spawns Claude CLI inside containers</p></div>
+                    <div class="pipeline-step"><h3>Proxy LLM</h3><p style="font-size:var(--small-size)">Routes LLM calls through orchestrator</p></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 25: CORE TRAITS
+     =================================================== -->
+<section class="slide gradient-mesh" data-title="Core Traits">
+    <span class="slide-number">25</span>
+    <div class="slide-content">
+        <p class="section-label reveal">Architecture</p>
+        <h2 class="reveal">10 Core Traits</h2>
+        <div class="separator reveal"></div>
+        <div class="grid reveal" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); margin-top: var(--content-gap);">
+            <div class="trait-box"><h3>Database</h3><p>7-sub-trait persistence</p></div>
+            <div class="trait-box"><h3>Channel</h3><p>Multi-channel input</p></div>
+            <div class="trait-box"><h3>Tool</h3><p>Extensible capabilities</p></div>
+            <div class="trait-box"><h3>LlmProvider</h3><p>Backend abstraction</p></div>
+            <div class="trait-box"><h3>SuccessEvaluator</h3><p>Outcome scoring</p></div>
+            <div class="trait-box"><h3>EmbeddingProvider</h3><p>Vector generation</p></div>
+            <div class="trait-box"><h3>NetworkPolicyDecider</h3><p>Outbound filtering</p></div>
+            <div class="trait-box"><h3>Hook</h3><p>Lifecycle interception</p></div>
+            <div class="trait-box"><h3>Observer</h3><p>Event recording</p></div>
+            <div class="trait-box"><h3>Tunnel</h3><p>Public exposure</p></div>
+        </div>
+        <p class="reveal" style="font-size:var(--small-size); color:var(--text-muted); margin-top:var(--element-gap);">Every subsystem plugs in via traits. Swap Oracle for Postgres. Swap Cloudflare for ngrok. The agent doesn't care.</p>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===================================================
+     SLIDE 26: CLOSING
+     =================================================== -->
+<section class="slide title-slide gradient-mesh grid-bg closing-slide" data-title="Get Started">
+    <div class="hex-grid"></div>
+    <div class="shield-glow"></div>
+    <div class="slide-content" style="z-index: 1;">
+        <p class="section-label reveal">Get Started</p>
+        <h1 class="reveal" style="font-size: var(--h2-size);">Iron<span class="accent-oracle">Ora</span>Claw</h1>
+        <div class="title-separator reveal"></div>
+        <div class="code-block reveal" style="max-width: min(80vw, 500px); text-align: left;">
+            <span class="comment"># Clone and run</span><br>
+            git clone https://github.com/jasperan/ironoraclaw<br>
+            <span class="keyword">cargo</span> build --release<br>
+            <span class="keyword">RUST_LOG</span>=ironclaw=debug cargo run
+        </div>
+        <div class="links reveal" style="margin-top: var(--content-gap);">
+            <span class="link-pill">MIT / Apache-2.0</span>
+            <span class="link-pill">Rust 1.92+</span>
+            <span class="link-pill">Oracle AI Database 26ai</span>
+        </div>
+    </div>
+    <div class="glow-line"></div>
+</section>
+
+<!-- ===========================================
+     JAVASCRIPT: SLIDE CONTROLLER
+     =========================================== -->
+<script>
+    class SlidePresentation {
+        constructor() {
+            this.slides = document.querySelectorAll('.slide');
+            this.currentSlide = 0;
+            this.isScrolling = false;
+            this.setupIntersectionObserver();
+            this.setupKeyboardNav();
+            this.setupTouchNav();
+            this.setupWheelNav();
+            this.setupProgressBar();
+            this.setupNavDots();
+        }
+
+        /* Intersection Observer: add .visible when slide enters viewport */
+        setupIntersectionObserver() {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        const idx = Array.from(this.slides).indexOf(entry.target);
+                        if (idx !== -1) {
+                            this.currentSlide = idx;
+                            this.updateProgressBar();
+                            this.updateNavDots();
+                        }
+                    }
+                });
+            }, { threshold: 0.5 });
+
+            this.slides.forEach(slide => observer.observe(slide));
+        }
+
+        /* Keyboard: arrows, space, page up/down */
+        setupKeyboardNav() {
+            document.addEventListener('keydown', (e) => {
+                switch(e.key) {
+                    case 'ArrowDown':
+                    case 'ArrowRight':
+                    case ' ':
+                    case 'PageDown':
+                        e.preventDefault();
+                        this.goToSlide(this.currentSlide + 1);
+                        break;
+                    case 'ArrowUp':
+                    case 'ArrowLeft':
+                    case 'PageUp':
+                        e.preventDefault();
+                        this.goToSlide(this.currentSlide - 1);
+                        break;
+                    case 'Home':
+                        e.preventDefault();
+                        this.goToSlide(0);
+                        break;
+                    case 'End':
+                        e.preventDefault();
+                        this.goToSlide(this.slides.length - 1);
+                        break;
+                }
+            });
+        }
+
+        /* Touch/swipe */
+        setupTouchNav() {
+            let startY = 0;
+            document.addEventListener('touchstart', (e) => {
+                startY = e.touches[0].clientY;
+            }, { passive: true });
+            document.addEventListener('touchend', (e) => {
+                const diff = startY - e.changedTouches[0].clientY;
+                if (Math.abs(diff) > 50) {
+                    this.goToSlide(this.currentSlide + (diff > 0 ? 1 : -1));
+                }
+            }, { passive: true });
+        }
+
+        /* Mouse wheel with debounce */
+        setupWheelNav() {
+            document.addEventListener('wheel', (e) => {
+                if (this.isScrolling) return;
+                this.isScrolling = true;
+                if (e.deltaY > 30) this.goToSlide(this.currentSlide + 1);
+                else if (e.deltaY < -30) this.goToSlide(this.currentSlide - 1);
+                setTimeout(() => this.isScrolling = false, 800);
+            }, { passive: true });
+        }
+
+        /* Progress bar */
+        setupProgressBar() {
+            this.progressBar = document.getElementById('progressBar');
+            this.updateProgressBar();
+        }
+
+        updateProgressBar() {
+            if (!this.progressBar) return;
+            const pct = ((this.currentSlide + 1) / this.slides.length) * 100;
+            this.progressBar.style.width = pct + '%';
+        }
+
+        /* Navigation dots */
+        setupNavDots() {
+            const nav = document.getElementById('navDots');
+            if (!nav) return;
+            this.slides.forEach((slide, i) => {
+                const dot = document.createElement('button');
+                dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+                dot.setAttribute('aria-label', `Go to slide ${i + 1}: ${slide.dataset.title || ''}`);
+                dot.addEventListener('click', () => this.goToSlide(i));
+                nav.appendChild(dot);
+            });
+            this.dots = nav.querySelectorAll('.nav-dot');
+        }
+
+        updateNavDots() {
+            if (!this.dots) return;
+            this.dots.forEach((dot, i) => {
+                dot.classList.toggle('active', i === this.currentSlide);
+            });
+        }
+
+        goToSlide(index) {
+            if (index < 0 || index >= this.slides.length) return;
+            this.currentSlide = index;
+            this.slides[index].scrollIntoView({ behavior: 'smooth' });
+            this.updateProgressBar();
+            this.updateNavDots();
+        }
+    }
+
+    /* Initialize on DOM ready */
+    document.addEventListener('DOMContentLoaded', () => {
+        new SlidePresentation();
+    });
+</script>
+
+</body>
+</html>

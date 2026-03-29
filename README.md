@@ -26,6 +26,25 @@
 
 IronOraClaw is a fork of [IronClaw](https://github.com/nearai/ironclaw) that replaces **ALL** storage backends with **Oracle AI Database** as the exclusive persistence layer. Every byte of memory, conversation, job state, and embedding lives in Oracle -- no PostgreSQL, no SQLite, no files.
 
+## Architecture at a Glance
+
+> **Full interactive presentation**: Open [`ironclaw-presentation.html`](ironclaw-presentation.html) in your browser for all 26 slides with animations and keyboard navigation.
+
+<table>
+<tr>
+<td align="center"><strong>Title</strong><br><img src="docs/slides/01-title.jpg" alt="IronOraClaw Title" width="400"/></td>
+<td align="center"><strong>The Pitch</strong><br><img src="docs/slides/02-pitch.jpg" alt="The Pitch" width="400"/></td>
+</tr>
+<tr>
+<td align="center"><strong>System Overview</strong><br><img src="docs/slides/04-architecture.jpg" alt="Architecture" width="400"/></td>
+<td align="center"><strong>6 Channel Types</strong><br><img src="docs/slides/09-channels.jpg" alt="Channels" width="400"/></td>
+</tr>
+<tr>
+<td align="center"><strong>Defense in Depth</strong><br><img src="docs/slides/18-safety.jpg" alt="Safety" width="400"/></td>
+<td align="center"><strong>10 Core Traits</strong><br><img src="docs/slides/25-traits.jpg" alt="Core Traits" width="400"/></td>
+</tr>
+</table>
+
 ## Why Oracle AI Database?
 
 - **In-Database ONNX Embeddings**: Generate 384-dim vectors with `VECTOR_EMBEDDING()` -- zero API calls, zero latency
@@ -222,7 +241,7 @@ host = "localhost"
 port = 1521
 service = "FREEPDB1"
 user = "ironoraclaw"
-password = "IronOraClaw2026"
+password = "IronOraClaw2026"  # pragma: allowlist secret
 onnx_model = "ALL_MINILM_L12_V2"
 agent_id = "default"
 ```
