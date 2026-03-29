@@ -800,7 +800,7 @@ mod tests {
         let key = aws_key_like();
 
         // At start
-        let result = detector.scan(key);
+        let result = detector.scan(&key);
         assert!(!result.is_clean(), "key at start not detected");
 
         // In middle
@@ -860,6 +860,7 @@ mod tests {
     /// Adversarial tests for leak detector regex patterns and masking.
     /// See <https://github.com/nearai/ironclaw/issues/1025>.
     mod adversarial {
+        use super::aws_key_like;
         use crate::leak_detector::{LeakDetector, mask_secret};
 
         // ── A. Regex backtracking / performance guards ───────────────
@@ -1196,7 +1197,7 @@ mod tests {
         fn rtl_override_prefix_on_aws_key() {
             let detector = LeakDetector::new();
             let content = format!("\u{202E}{}", aws_key_like());
-            let result = detector.scan(content);
+            let result = detector.scan(&content);
             // RTL override is \u{202E} (3 bytes), prepended before "AKIA".
             // The regex has no word boundary anchor on the left for AWS keys,
             // so the AKIA prefix is still matched after the RTL char.
@@ -1236,7 +1237,7 @@ mod tests {
         fn emoji_adjacent_to_secret() {
             let detector = LeakDetector::new();
             let content = format!("🔑{}🔑", aws_key_like());
-            let result = detector.scan(content);
+            let result = detector.scan(&content);
             assert!(
                 !result.is_clean(),
                 "emoji adjacent to AWS key should still detect"
@@ -1297,7 +1298,7 @@ mod tests {
         fn bom_prefix_does_not_hide_secrets() {
             let detector = LeakDetector::new();
             let content = format!("\u{FEFF}{}", aws_key_like());
-            let result = detector.scan(content);
+            let result = detector.scan(&content);
             assert!(
                 !result.is_clean(),
                 "BOM prefix should not prevent AWS key detection"
@@ -1309,7 +1310,7 @@ mod tests {
             let detector = LeakDetector::new();
             // Null byte before a real secret
             let content = format!("\x00{}", aws_key_like());
-            let result = detector.scan(content);
+            let result = detector.scan(&content);
             // Null byte is a separate char, AKIA still follows — should detect
             assert!(
                 !result.is_clean(),
