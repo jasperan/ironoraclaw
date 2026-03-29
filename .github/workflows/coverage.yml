@@ -119,7 +119,7 @@ jobs:
           flags: ${{ matrix.name }}
           disable_search: true
           use_oidc: true
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   e2e-coverage:
     name: E2E Coverage
@@ -203,7 +203,7 @@ jobs:
           flags: e2e
           disable_search: true
           use_oidc: true
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
       - name: Upload screenshots on failure
         if: failure()

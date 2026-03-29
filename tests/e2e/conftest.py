@@ -148,17 +148,26 @@ def _forward_coverage_env(env: dict[str, str]) -> None:
 
 @pytest.fixture(scope="session")
 def ironclaw_binary():
-    """Ensure ironclaw binary is built. Returns the binary path."""
-    binary = ROOT / "target" / "debug" / "ironclaw"
+    """Ensure the app binary is built. Returns the binary path."""
+    candidates = [
+        ROOT / "target" / "debug" / "ironoraclaw",
+        ROOT / "target" / "debug" / "ironclaw",
+    ]
+
+    binary = next((path for path in candidates if path.exists()), candidates[0])
     if _binary_needs_rebuild(binary):
-        print("Building ironclaw (this may take a while)...")
+        print("Building app binary (this may take a while)...")
         subprocess.run(
             ["cargo", "build", "--no-default-features", "--features", "libsql"],
             cwd=ROOT,
             check=True,
             timeout=600,
         )
-    assert binary.exists(), f"Binary not found at {binary}"
+        binary = next((path for path in candidates if path.exists()), candidates[0])
+
+    assert binary.exists(), (
+        "Binary not found. Checked: " + ", ".join(str(path) for path in candidates)
+    )
     return str(binary)
 
 
