@@ -10,12 +10,11 @@
 
 use std::sync::Arc;
 
-use ironoraclaw::{
+use ironclaw::{
     agent::HeartbeatRunner,
     config::Config,
     history::Store,
-    llm::{SessionConfig, create_llm_provider, create_session_manager},
-    safety::SafetyLayer,
+    llm::{create_llm_provider, create_session_manager},
     workspace::Workspace,
 };
 
@@ -84,42 +83,39 @@ async fn test_heartbeat_end_to_end() {
     }
 
     // 5. Create LLM provider
-    let session = create_session_manager(SessionConfig {
-        auth_base_url: config.llm.nearai.auth_base_url.clone(),
-        session_path: config.llm.nearai.session_path.clone(),
-    })
-    .await;
-    let llm = create_llm_provider(&config.llm, session).expect("Failed to create LLM provider");
+    let session = create_session_manager(config.llm.session.clone()).await;
+    let llm = create_llm_provider(&config.llm, session)
+        .await
+        .expect("Failed to create LLM provider");
     println!("[5/6] LLM provider created (model: {})", llm.model_name());
 
     // 6. Run heartbeat check
     println!("[6/6] Running check_heartbeat()...\n");
 
-    let hb_config = ironoraclaw::agent::HeartbeatConfig::default();
-    let hygiene_config = ironoraclaw::workspace::hygiene::HygieneConfig::default();
-    let safety = Arc::new(SafetyLayer::new(&config.safety));
-    let runner = HeartbeatRunner::new(hb_config, hygiene_config, workspace, llm, safety);
+    let hb_config = ironclaw::agent::HeartbeatConfig::default();
+    let hygiene_config = ironclaw::workspace::hygiene::HygieneConfig::default();
+    let runner = HeartbeatRunner::new(hb_config, hygiene_config, workspace, llm);
 
     let result = runner.check_heartbeat().await;
 
     println!("=== Result ===\n");
     match &result {
-        ironoraclaw::agent::HeartbeatResult::Ok => {
+        ironclaw::agent::HeartbeatResult::Ok => {
             println!("HeartbeatResult::Ok");
             println!("  LLM responded HEARTBEAT_OK, nothing needs attention.");
         }
-        ironoraclaw::agent::HeartbeatResult::NeedsAttention(msg) => {
+        ironclaw::agent::HeartbeatResult::NeedsAttention(msg) => {
             println!("HeartbeatResult::NeedsAttention");
             println!("  Message:\n{}", msg);
         }
-        ironoraclaw::agent::HeartbeatResult::Skipped => {
+        ironclaw::agent::HeartbeatResult::Skipped => {
             println!("HeartbeatResult::Skipped");
             println!("  No checklist found, or checklist was effectively empty.");
             println!("  This means the HEARTBEAT.md either:");
             println!("    - Does not exist in the workspace database");
             println!("    - Contains only headers, comments, and empty checkboxes");
         }
-        ironoraclaw::agent::HeartbeatResult::Failed(err) => {
+        ironclaw::agent::HeartbeatResult::Failed(err) => {
             println!("HeartbeatResult::Failed");
             println!("  Error: {}", err);
         }

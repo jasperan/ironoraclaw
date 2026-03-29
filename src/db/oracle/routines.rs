@@ -1,6 +1,9 @@
 //! Oracle implementation of RoutineStore.
 
-use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -96,10 +99,10 @@ fn row_to_routine(row: &oracle::Row) -> Result<Routine, DatabaseError> {
     let created_at_str: String = row.get(22).unwrap_or_default();
     let updated_at_str: String = row.get(23).unwrap_or_default();
 
-    let trigger_config: serde_json::Value =
-        serde_json::from_str(&trigger_config_str).unwrap_or(serde_json::Value::Object(Default::default()));
-    let action_config: serde_json::Value =
-        serde_json::from_str(&action_config_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    let trigger_config: serde_json::Value = serde_json::from_str(&trigger_config_str)
+        .unwrap_or(serde_json::Value::Object(Default::default()));
+    let action_config: serde_json::Value = serde_json::from_str(&action_config_str)
+        .unwrap_or(serde_json::Value::Object(Default::default()));
 
     let trigger = Trigger::from_db(&trigger_type, trigger_config)
         .map_err(|e| DatabaseError::Serialization(e.to_string()))?;
@@ -121,12 +124,17 @@ fn row_to_routine(row: &oracle::Row) -> Result<Routine, DatabaseError> {
         },
         notify: NotifyConfig {
             channel: notify_channel,
-            user: notify_user,
+            user: if notify_user == "default" {
+                None
+            } else {
+                Some(notify_user)
+            },
             on_success: notify_on_success != 0,
             on_failure: notify_on_failure != 0,
             on_attention: notify_on_attention != 0,
         },
-        state: serde_json::from_str(&state_str).unwrap_or(serde_json::Value::Object(Default::default())),
+        state: serde_json::from_str(&state_str)
+            .unwrap_or(serde_json::Value::Object(Default::default())),
         last_run_at: last_run_at_str.and_then(|s| parse_opt_ts(&s)),
         next_fire_at: next_fire_at_str.and_then(|s| parse_opt_ts(&s)),
         run_count: run_count as u64,
@@ -187,7 +195,11 @@ impl RoutineStore for OracleBackend {
         let dedup_window_secs: Option<i64> =
             routine.guardrails.dedup_window.map(|d| d.as_secs() as i64);
         let notify_channel = routine.notify.channel.clone();
-        let notify_user = routine.notify.user.clone();
+        let notify_user = routine
+            .notify
+            .user
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
         let notify_on_success = routine.notify.on_success as i32;
         let notify_on_failure = routine.notify.on_failure as i32;
         let notify_on_attention = routine.notify.on_attention as i32;
@@ -244,7 +256,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!(
                 "SELECT {} FROM IRON_ROUTINES WHERE id = :1",
                 ROUTINE_COLUMNS
@@ -274,7 +288,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!(
                 "SELECT {} FROM IRON_ROUTINES WHERE user_id = :1 AND name = :2",
                 ROUTINE_COLUMNS
@@ -299,7 +315,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!(
                 "SELECT {} FROM IRON_ROUTINES WHERE user_id = :1 ORDER BY name",
                 ROUTINE_COLUMNS
@@ -309,7 +327,34 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                routines.push(row_to_routine(&row)?);
+            }
+            Ok(routines)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn list_all_routines(&self) -> Result<Vec<Routine>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let sql = format!(
+                "SELECT {} FROM IRON_ROUTINES ORDER BY name",
+                ROUTINE_COLUMNS
+            );
+            let rows = conn
+                .query(&sql, &[] as &[&dyn oracle::sql_type::ToSql])
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut routines = Vec::new();
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -324,7 +369,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!(
                 "SELECT {} FROM IRON_ROUTINES WHERE enabled = 1 AND trigger_type = 'event'",
                 ROUTINE_COLUMNS
@@ -334,7 +381,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -359,7 +406,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut routines = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 routines.push(row_to_routine(&row)?);
             }
@@ -384,7 +431,11 @@ impl RoutineStore for OracleBackend {
         let dedup_window_secs: Option<i64> =
             routine.guardrails.dedup_window.map(|d| d.as_secs() as i64);
         let notify_channel = routine.notify.channel.clone();
-        let notify_user = routine.notify.user.clone();
+        let notify_user = routine
+            .notify
+            .user
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
         let notify_on_success = routine.notify.on_success as i32;
         let notify_on_failure = routine.notify.on_failure as i32;
         let notify_on_attention = routine.notify.on_attention as i32;
@@ -485,15 +536,17 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let stmt = conn
-                .execute(
-                    "DELETE FROM IRON_ROUTINES WHERE id = :1",
-                    &[&id_str],
-                )
+                .execute("DELETE FROM IRON_ROUTINES WHERE id = :1", &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            let count = stmt.row_count().map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let count = stmt
+                .row_count()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(count > 0)
         })
         .await
@@ -512,7 +565,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "INSERT INTO IRON_ROUTINE_RUNS (
                     id, routine_id, trigger_type, trigger_detail,
@@ -533,7 +588,8 @@ impl RoutineStore for OracleBackend {
                 ],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -557,7 +613,9 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "UPDATE IRON_ROUTINE_RUNS SET
                     completed_at = TO_TIMESTAMP(:5, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"'),
@@ -574,7 +632,8 @@ impl RoutineStore for OracleBackend {
                 ],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -602,7 +661,7 @@ impl RoutineStore for OracleBackend {
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut runs = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
                 runs.push(row_to_routine_run(&row)?);
             }
@@ -637,6 +696,95 @@ impl RoutineStore for OracleBackend {
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
     }
 
+    async fn count_running_routine_runs_batch(
+        &self,
+        routine_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, i64>, DatabaseError> {
+        if routine_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let conn_mgr = self.conn_mgr.clone();
+        let routine_id_set: HashSet<Uuid> = routine_ids.iter().copied().collect();
+        let requested_ids = routine_ids.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT routine_id, COUNT(*) FROM IRON_ROUTINE_RUNS WHERE status = 'running' GROUP BY routine_id",
+                    &[] as &[&dyn oracle::sql_type::ToSql],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut counts = HashMap::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let routine_id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let Ok(routine_id) = routine_id_str.parse() else {
+                    continue;
+                };
+                if routine_id_set.contains(&routine_id) {
+                    let count: i64 = row.get(1).unwrap_or(0);
+                    counts.insert(routine_id, count);
+                }
+            }
+
+            for id in requested_ids {
+                counts.entry(id).or_insert(0);
+            }
+            Ok::<_, DatabaseError>(counts)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn batch_get_last_run_status(
+        &self,
+        routine_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, RunStatus>, DatabaseError> {
+        if routine_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let conn_mgr = self.conn_mgr.clone();
+        let routine_id_set: HashSet<Uuid> = routine_ids.iter().copied().collect();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT routine_id, status FROM ( \
+                        SELECT routine_id, status, ROW_NUMBER() OVER (PARTITION BY routine_id ORDER BY started_at DESC) AS rn \
+                        FROM IRON_ROUTINE_RUNS \
+                    ) WHERE rn = 1",
+                    &[] as &[&dyn oracle::sql_type::ToSql],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut statuses = HashMap::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let routine_id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let Ok(routine_id) = routine_id_str.parse() else {
+                    continue;
+                };
+                if !routine_id_set.contains(&routine_id) {
+                    continue;
+                }
+                let status_str: String = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                if let Ok(status) = status_str.parse::<RunStatus>() {
+                    statuses.insert(routine_id, status);
+                }
+            }
+            Ok::<_, DatabaseError>(statuses)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
     async fn link_routine_run_to_job(
         &self,
         run_id: Uuid,
@@ -648,17 +796,94 @@ impl RoutineStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "UPDATE IRON_ROUTINE_RUNS SET job_id = :1 WHERE id = :2",
                 &[&job_id_str, &run_id_str],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))??;
         Ok(())
+    }
+
+    async fn get_webhook_routine_by_path(
+        &self,
+        path: &str,
+        user_id: Option<&str>,
+    ) -> Result<Option<Routine>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let path = path.to_string();
+        let user_id = user_id.map(str::to_string);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let sql = if user_id.is_some() {
+                format!(
+                    "SELECT {} FROM IRON_ROUTINES WHERE enabled = 1 AND trigger_type = 'webhook' \
+                     AND user_id = :2 \
+                     AND (JSON_VALUE(trigger_config, '$.path' RETURNING VARCHAR2(4000)) = :1 \
+                     OR (JSON_VALUE(trigger_config, '$.path' RETURNING VARCHAR2(4000)) IS NULL AND id = :1))",
+                    ROUTINE_COLUMNS
+                )
+            } else {
+                format!(
+                    "SELECT {} FROM IRON_ROUTINES WHERE enabled = 1 AND trigger_type = 'webhook' \
+                     AND (JSON_VALUE(trigger_config, '$.path' RETURNING VARCHAR2(4000)) = :1 \
+                     OR (JSON_VALUE(trigger_config, '$.path' RETURNING VARCHAR2(4000)) IS NULL AND id = :1))",
+                    ROUTINE_COLUMNS
+                )
+            };
+
+            let rows = if let Some(uid) = user_id.as_ref() {
+                conn.query(&sql, &[&path, uid])
+            } else {
+                conn.query(&sql, &[&path])
+            }
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            if let Some(row_result) = rows.into_iter().next() {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                Ok::<_, DatabaseError>(Some(row_to_routine(&row)?))
+            } else {
+                Ok::<_, DatabaseError>(None)
+            }
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn list_dispatched_routine_runs(&self) -> Result<Vec<RoutineRun>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let sql = format!(
+                "SELECT {} FROM IRON_ROUTINE_RUNS WHERE status = 'running' AND job_id IS NOT NULL",
+                ROUTINE_RUN_COLUMNS
+            );
+            let rows = conn
+                .query(&sql, &[] as &[&dyn oracle::sql_type::ToSql])
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut runs = Vec::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                runs.push(row_to_routine_run(&row)?);
+            }
+            Ok::<_, DatabaseError>(runs)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
     }
 }

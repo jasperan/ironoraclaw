@@ -9,7 +9,7 @@ use super::OracleBackend;
 use crate::context::{ActionRecord, JobContext, JobState};
 use crate::db::JobStore;
 use crate::error::DatabaseError;
-use crate::history::LlmCallRecord;
+use crate::history::{AgentJobRecord, AgentJobSummary, LlmCallRecord};
 
 fn fmt_ts(dt: &chrono::DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -44,6 +44,41 @@ fn parse_job_state(s: &str) -> JobState {
         "cancelled" => JobState::Cancelled,
         _ => JobState::Pending,
     }
+}
+
+fn row_to_agent_job(row: &oracle::Row) -> Result<AgentJobRecord, DatabaseError> {
+    let id_str: String = row
+        .get(0)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let created_at_str: String = row
+        .get(5)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let started_at_str: Option<String> = row
+        .get(6)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let completed_at_str: Option<String> = row
+        .get(7)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+    Ok(AgentJobRecord {
+        id: id_str.parse().unwrap_or_default(),
+        title: row
+            .get(1)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?,
+        status: row
+            .get(2)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?,
+        user_id: row
+            .get::<usize, Option<String>>(3)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .unwrap_or_default(),
+        failure_reason: row
+            .get(4)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?,
+        created_at: parse_ts(&created_at_str),
+        started_at: parse_opt_ts(&started_at_str),
+        completed_at: parse_opt_ts(&completed_at_str),
+    })
 }
 
 #[async_trait]
@@ -158,6 +193,7 @@ impl JobStore for OracleBackend {
                     job_id: row.get::<usize, String>(0).map_err(|e| DatabaseError::Query(e.to_string()))?.parse().unwrap_or_default(),
                     state: parse_job_state(&status_str),
                     user_id: row.get(6).map_err(|e| DatabaseError::Query(e.to_string()))?,
+                    requester_id: None,
                     conversation_id: row.get::<usize, Option<String>>(1)
                         .map_err(|e| DatabaseError::Query(e.to_string()))?
                         .and_then(|s| s.parse().ok()),
@@ -181,6 +217,9 @@ impl JobStore for OracleBackend {
                     transitions: Vec::new(),
                     metadata: serde_json::Value::Null,
                     extra_env: std::sync::Arc::new(std::collections::HashMap::new()),
+                    http_interceptor: None,
+                    tool_output_stash: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+                    user_timezone: "UTC".to_string(),
                 }));
             }
             Ok::<_, DatabaseError>(None)
@@ -202,13 +241,20 @@ impl JobStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "UPDATE IRON_JOBS SET status = :2, failure_reason = :3 WHERE id = :1",
-                &[&id_str, &status_str, &failure as &dyn oracle::sql_type::ToSql],
+                &[
+                    &id_str,
+                    &status_str,
+                    &failure as &dyn oracle::sql_type::ToSql,
+                ],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -240,19 +286,176 @@ impl JobStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let rows = conn.query("SELECT id FROM IRON_JOBS WHERE status = 'stuck'", &[])
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT id FROM IRON_JOBS WHERE status = 'stuck'",
+                    &[] as &[&dyn oracle::sql_type::ToSql],
+                )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut ids = Vec::new();
-            if let Some(row_result) = rows.into_iter().next() {
+            for row_result in rows {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let id_str: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let id_str: String = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 if let Ok(id) = id_str.parse() {
                     ids.push(id);
                 }
             }
             Ok::<_, DatabaseError>(ids)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn list_agent_jobs(&self) -> Result<Vec<AgentJobRecord>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT id, title, status, user_id, failure_reason, \
+                            TO_CHAR(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS created_at, \
+                            TO_CHAR(started_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS started_at, \
+                            TO_CHAR(completed_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS completed_at \
+                     FROM IRON_JOBS WHERE source = 'direct' ORDER BY created_at DESC",
+                    &[] as &[&dyn oracle::sql_type::ToSql],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut jobs = Vec::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                jobs.push(row_to_agent_job(&row)?);
+            }
+            Ok::<_, DatabaseError>(jobs)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn list_agent_jobs_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<AgentJobRecord>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT id, title, status, user_id, failure_reason, \
+                            TO_CHAR(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS created_at, \
+                            TO_CHAR(started_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS started_at, \
+                            TO_CHAR(completed_at, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') AS completed_at \
+                     FROM IRON_JOBS WHERE source = 'direct' AND user_id = :1 ORDER BY created_at DESC",
+                    &[&user_id],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut jobs = Vec::new();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                jobs.push(row_to_agent_job(&row)?);
+            }
+            Ok::<_, DatabaseError>(jobs)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn agent_job_summary(&self) -> Result<AgentJobSummary, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT status, COUNT(*) FROM IRON_JOBS WHERE source = 'direct' GROUP BY status",
+                    &[] as &[&dyn oracle::sql_type::ToSql],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut summary = AgentJobSummary::default();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let status: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let count: i64 = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                summary.add_count(&status, count as usize);
+            }
+            Ok::<_, DatabaseError>(summary)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn agent_job_summary_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<AgentJobSummary, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let user_id = user_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT status, COUNT(*) FROM IRON_JOBS WHERE source = 'direct' AND user_id = :1 GROUP BY status",
+                    &[&user_id],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            let mut summary = AgentJobSummary::default();
+            for row_result in rows {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let status: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let count: i64 = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                summary.add_count(&status, count as usize);
+            }
+            Ok::<_, DatabaseError>(summary)
+        })
+        .await
+        .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
+    }
+
+    async fn get_agent_job_failure_reason(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<String>, DatabaseError> {
+        let conn_mgr = self.conn_mgr.clone();
+        let id_str = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn_mgr.conn();
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT failure_reason FROM IRON_JOBS WHERE id = :1",
+                    &[&id_str],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+            if let Some(row_result) = rows.into_iter().next() {
+                let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let failure_reason: Option<String> = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
+                Ok::<_, DatabaseError>(failure_reason)
+            } else {
+                Ok::<_, DatabaseError>(None)
+            }
         })
         .await
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?
@@ -277,29 +480,35 @@ impl JobStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = "INSERT INTO IRON_ACTIONS \
                 (id, job_id, sequence_num, tool_name, input, output_raw, output_sanitized, \
                  sanitization_warnings, cost, duration_ms, success, error_message, created_at) \
                 VALUES (:1, :2, :3, :4, :5, :6, :7, :8, TO_NUMBER(:9), :10, :11, :12, \
                         TO_TIMESTAMP(:13, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"'))";
-            conn.execute(sql, &[
-                &action_id,
-                &job_id,
-                &sequence,
-                &tool_name,
-                &input,
-                &output_raw as &dyn oracle::sql_type::ToSql,
-                &output_sanitized as &dyn oracle::sql_type::ToSql,
-                &warnings,
-                &cost as &dyn oracle::sql_type::ToSql,
-                &duration_ms,
-                &success,
-                &error as &dyn oracle::sql_type::ToSql,
-                &executed_at,
-            ])
+            conn.execute(
+                sql,
+                &[
+                    &action_id,
+                    &job_id,
+                    &sequence,
+                    &tool_name,
+                    &input,
+                    &output_raw as &dyn oracle::sql_type::ToSql,
+                    &output_sanitized as &dyn oracle::sql_type::ToSql,
+                    &warnings,
+                    &cost as &dyn oracle::sql_type::ToSql,
+                    &duration_ms,
+                    &success,
+                    &error as &dyn oracle::sql_type::ToSql,
+                    &executed_at,
+                ],
+            )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await

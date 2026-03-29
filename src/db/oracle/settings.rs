@@ -41,7 +41,9 @@ impl SettingsStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let rows = conn
                 .query(
                     "SELECT value FROM IRON_SETTINGS WHERE user_id = :1 AND key = :2",
@@ -143,15 +145,20 @@ impl SettingsStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let stmt = conn
                 .execute(
                     "DELETE FROM IRON_SETTINGS WHERE user_id = :1 AND key = :2",
                     &[&user_id, &key],
                 )
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            let count = stmt.row_count().map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let count = stmt
+                .row_count()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(count > 0)
         })
         .await
@@ -201,7 +208,9 @@ impl SettingsStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let rows = conn
                 .query(
                     "SELECT key, value FROM IRON_SETTINGS WHERE user_id = :1",
@@ -271,7 +280,9 @@ impl SettingsStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let rows = conn
                 .query(
                     "SELECT COUNT(*) FROM IRON_SETTINGS WHERE user_id = :1",

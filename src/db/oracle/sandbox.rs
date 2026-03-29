@@ -34,20 +34,48 @@ fn parse_opt_ts(s: &Option<String>) -> Option<DateTime<Utc>> {
 /// 0:id, 1:tool_name(task), 2:message(cred_json), 3:status, 4:user_id, 5:job_id(project_dir),
 /// 6:success, 7:failure_reason(message), 8:created_at, 9:started_at, 10:completed_at
 fn row_to_sandbox_job(row: &oracle::Row) -> Result<SandboxJobRecord, DatabaseError> {
-    let success_val: Option<i64> = row.get(6).map_err(|e| DatabaseError::Query(e.to_string()))?;
-    let created_str: String = row.get(8).map_err(|e| DatabaseError::Query(e.to_string()))?;
-    let started_str: Option<String> = row.get(9).map_err(|e| DatabaseError::Query(e.to_string()))?;
-    let completed_str: Option<String> = row.get(10).map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let success_val: Option<i64> = row
+        .get(6)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let created_str: String = row
+        .get(8)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let started_str: Option<String> = row
+        .get(9)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
+    let completed_str: Option<String> = row
+        .get(10)
+        .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
     Ok(SandboxJobRecord {
-        id: row.get::<usize, String>(0).map_err(|e| DatabaseError::Query(e.to_string()))?.parse().unwrap_or_default(),
-        task: row.get::<usize, Option<String>>(1).map_err(|e| DatabaseError::Query(e.to_string()))?.unwrap_or_default(),
-        credential_grants_json: row.get::<usize, Option<String>>(2).map_err(|e| DatabaseError::Query(e.to_string()))?.unwrap_or_default(),
-        status: row.get(3).map_err(|e| DatabaseError::Query(e.to_string()))?,
-        user_id: row.get::<usize, Option<String>>(4).map_err(|e| DatabaseError::Query(e.to_string()))?.unwrap_or_default(),
-        project_dir: row.get::<usize, Option<String>>(5).map_err(|e| DatabaseError::Query(e.to_string()))?.unwrap_or_default(),
+        id: row
+            .get::<usize, String>(0)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .parse()
+            .unwrap_or_default(),
+        task: row
+            .get::<usize, Option<String>>(1)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .unwrap_or_default(),
+        credential_grants_json: row
+            .get::<usize, Option<String>>(2)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .unwrap_or_default(),
+        status: row
+            .get(3)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?,
+        user_id: row
+            .get::<usize, Option<String>>(4)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .unwrap_or_default(),
+        project_dir: row
+            .get::<usize, Option<String>>(5)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?
+            .unwrap_or_default(),
         success: success_val.map(|v| v != 0),
-        failure_reason: row.get(7).map_err(|e| DatabaseError::Query(e.to_string()))?,
+        failure_reason: row
+            .get(7)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?,
         created_at: parse_ts(&created_str),
         started_at: parse_opt_ts(&started_str),
         completed_at: parse_opt_ts(&completed_str),
@@ -125,9 +153,12 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!("{} WHERE id = :1", SANDBOX_SELECT);
-            let rows = conn.query(&sql, &[&id_str])
+            let rows = conn
+                .query(&sql, &[&id_str])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
@@ -144,9 +175,12 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             let sql = format!("{} ORDER BY created_at DESC", SANDBOX_SELECT);
-            let rows = conn.query(&sql, &[])
+            let rows = conn
+                .query(&sql, &[])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut jobs = Vec::new();
             if let Some(row_result) = rows.into_iter().next() {
@@ -210,18 +244,24 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let stmt = conn.execute(
-                "UPDATE IRON_SANDBOX_JOBS SET \
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let stmt = conn
+                .execute(
+                    "UPDATE IRON_SANDBOX_JOBS SET \
                     status = 'interrupted', \
                     message = 'Process restarted', \
                     completed_at = TO_TIMESTAMP(:1, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3\"Z\"') \
                 WHERE status IN ('running', 'creating')",
-                &[&now],
-            )
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            let count = stmt.row_count().map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+                    &[&now],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let count = stmt
+                .row_count()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if count > 0 {
                 tracing::info!("Marked {} stale sandbox jobs as interrupted", count);
             }
@@ -236,18 +276,25 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let rows = conn.query(
-                "SELECT status, COUNT(*) AS cnt FROM IRON_SANDBOX_JOBS GROUP BY status",
-                &[],
-            )
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT status, COUNT(*) AS cnt FROM IRON_SANDBOX_JOBS GROUP BY status",
+                    &[],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
 
             let mut summary = SandboxJobSummary::default();
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let status: String = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let count: i64 = row.get(1).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let status: String = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let count: i64 = row
+                    .get(1)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 let count = count as usize;
                 summary.total += count;
                 match status.as_str() {
@@ -274,9 +321,15 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let sql = format!("{} WHERE user_id = :1 ORDER BY created_at DESC", SANDBOX_SELECT);
-            let rows = conn.query(&sql, &[&user_id])
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let sql = format!(
+                "{} WHERE user_id = :1 ORDER BY created_at DESC",
+                SANDBOX_SELECT
+            );
+            let rows = conn
+                .query(&sql, &[&user_id])
                 .map_err(|e| DatabaseError::Query(e.to_string()))?;
             let mut jobs = Vec::new();
             if let Some(row_result) = rows.into_iter().next() {
@@ -338,15 +391,20 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let rows = conn.query(
-                "SELECT COUNT(*) FROM IRON_SANDBOX_JOBS WHERE id = :1 AND user_id = :2",
-                &[&id_str, &user_id],
-            )
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT COUNT(*) FROM IRON_SANDBOX_JOBS WHERE id = :1 AND user_id = :2",
+                    &[&id_str, &user_id],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let count: i64 = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let count: i64 = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(count > 0);
             }
             Ok::<_, DatabaseError>(false)
@@ -362,13 +420,16 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "UPDATE IRON_SANDBOX_JOBS SET mode = :2 WHERE id = :1",
                 &[&id_str, &mode],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -381,15 +442,20 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
-            let rows = conn.query(
-                "SELECT mode FROM IRON_SANDBOX_JOBS WHERE id = :1",
-                &[&id_str],
-            )
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let rows = conn
+                .query(
+                    "SELECT mode FROM IRON_SANDBOX_JOBS WHERE id = :1",
+                    &[&id_str],
+                )
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let mode: Option<String> = row.get(0).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let mode: Option<String> = row
+                    .get(0)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 return Ok(mode);
             }
             Ok::<_, DatabaseError>(None)
@@ -411,13 +477,16 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
             conn.execute(
                 "INSERT INTO IRON_JOB_EVENTS (job_id, event_type, data) VALUES (:1, :2, :3)",
                 &[&job_id, &event_type, &data_str],
             )
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            conn.commit().map_err(|e| DatabaseError::Query(e.to_string()))?;
+            conn.commit()
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
             Ok::<_, DatabaseError>(())
         })
         .await
@@ -434,7 +503,9 @@ impl SandboxStore for OracleBackend {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
-            let conn = conn.lock().map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| DatabaseError::Query(format!("Lock error: {e}")))?;
 
             let rows = if let Some(n) = limit {
                 let sql = "SELECT * FROM (\
@@ -456,12 +527,24 @@ impl SandboxStore for OracleBackend {
             let mut events = Vec::new();
             if let Some(row_result) = rows.into_iter().next() {
                 let row = row_result.map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let data_str: Option<String> = row.get(3).map_err(|e| DatabaseError::Query(e.to_string()))?;
-                let ts_str: String = row.get(4).map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let data_str: Option<String> = row
+                    .get(3)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
+                let ts_str: String = row
+                    .get(4)
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 events.push(JobEventRecord {
-                    id: row.get::<usize, i64>(0).map_err(|e| DatabaseError::Query(e.to_string()))?,
-                    job_id: row.get::<usize, String>(1).map_err(|e| DatabaseError::Query(e.to_string()))?.parse().unwrap_or_default(),
-                    event_type: row.get(2).map_err(|e| DatabaseError::Query(e.to_string()))?,
+                    id: row
+                        .get::<usize, i64>(0)
+                        .map_err(|e| DatabaseError::Query(e.to_string()))?,
+                    job_id: row
+                        .get::<usize, String>(1)
+                        .map_err(|e| DatabaseError::Query(e.to_string()))?
+                        .parse()
+                        .unwrap_or_default(),
+                    event_type: row
+                        .get(2)
+                        .map_err(|e| DatabaseError::Query(e.to_string()))?,
                     data: data_str
                         .and_then(|s| serde_json::from_str(&s).ok())
                         .unwrap_or(serde_json::Value::Null),
