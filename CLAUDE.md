@@ -1,18 +1,67 @@
-# IronClaw Development Guide
+# IronOraClaw Development Guide
 
-**IronClaw** is a secure personal AI assistant — user-first security, self-expanding tools, defense in depth, multi-channel access with proactive background execution.
+**IronOraClaw** is a fork of IronClaw with Oracle AI Database as the exclusive persistence layer. Oracle replaces PostgreSQL as the primary backend; libSQL remains available as a secondary option.
 
 ## Build & Test
 
 ```bash
 cargo fmt                                                    # format
 cargo clippy --all --benches --tests --examples --all-features  # lint (zero warnings)
-cargo test                                                   # unit tests
-cargo test --features integration                            # + PostgreSQL tests
+cargo build                                                  # oracle + libsql (default)
+cargo build --no-default-features --features libsql          # libsql only
+cargo build --features postgres                              # add postgres (upstream compat)
+cargo test                                                   # unit tests (oracle default)
+cargo test --features integration                            # integration tests (needs Oracle DB)
 RUST_LOG=ironclaw=debug cargo run                            # run with logging
 ```
 
 E2E tests: see `tests/e2e/CLAUDE.md`.
+
+## Oracle Quick Start
+
+```bash
+# 1. Start Oracle AI Database 26ai Free container (~2 min to become healthy)
+docker compose up -d
+
+# 2. Copy and configure env
+cp .env.example .env
+# Edit .env — minimum required: IRONORACLAW_ORACLE_PASSWORD
+
+# 3. Run
+cargo run
+```
+
+The default `.env.example` targets `localhost:1521/FREEPDB1` with user `ironoraclaw`.
+
+## Oracle Connection Modes
+
+Two modes controlled by `IRONORACLAW_ORACLE_MODE`:
+
+| Mode | Config vars | Use case |
+|------|-------------|----------|
+| `freepdb` (default) | `HOST`, `PORT`, `SERVICE`, `USER`, `PASSWORD` | Local Docker / Oracle DB Free |
+| `adb` | `DSN` (+ optional `USER`, `PASSWORD`) | Oracle Autonomous Database (wallet-less TLS or mTLS) |
+
+Key env vars:
+```
+DATABASE_BACKEND=oracle
+IRONORACLAW_ORACLE_HOST=localhost
+IRONORACLAW_ORACLE_PORT=1521
+IRONORACLAW_ORACLE_SERVICE=FREEPDB1
+IRONORACLAW_ORACLE_USER=ironoraclaw
+IRONORACLAW_ORACLE_PASSWORD=...
+IRONORACLAW_ORACLE_MODE=freepdb
+# ADB only:
+# IRONORACLAW_ORACLE_DSN=...
+```
+
+## Oracle Backend Gotchas
+
+- The `oracle` crate is **synchronous**. Every Oracle call is wrapped in `tokio::task::spawn_blocking`. Never call Oracle APIs directly from async context.
+- Connection is a single `Arc<Mutex<Connection>>` — no connection pool. Contention under load is expected; pool support is a known limitation.
+- SQL dialect: use `RETURNING ... INTO :out` for inserts with generated IDs; no `RETURNING id` as in PostgreSQL.
+- Vector search uses Oracle AI Vector Search (`VECTOR` column type, `VECTOR_DISTANCE()` function) — not pgvector or libSQL `F32_BLOB`.
+- Schema is initialized via `src/db/oracle/schema.rs` using `CREATE TABLE IF NOT EXISTS` (no migration framework like refinery).
 
 ## Code Style
 
@@ -174,7 +223,15 @@ tests/
 
 ## Database
 
-Dual-backend: PostgreSQL + libSQL/Turso. **All new persistence features must support both backends.** See `src/db/CLAUDE.md` and `.claude/rules/database.md`.
+Primary backend is **Oracle AI Database** (`src/db/oracle/`). libSQL/Turso is the secondary embedded option. PostgreSQL support exists for upstream compatibility but is not the default. **All new persistence features must implement the Oracle backend first.** See `src/db/CLAUDE.md`.
+
+Oracle backend files live in `src/db/oracle/` — one file per Database sub-trait (conversations, jobs, routines, sandbox, settings, tool_failures, workspace). Schema init is in `oracle/schema.rs`, not in `migrations/`.
+
+| Backend | Feature flag | Default |
+|---------|-------------|---------|
+| Oracle | `oracle` | yes |
+| libSQL | `libsql` | yes |
+| PostgreSQL | `postgres` | no |
 
 ## Module Specs
 
@@ -236,9 +293,11 @@ RUST_LOG=ironclaw=debug,tower_http=debug cargo run  # + HTTP request logging
 ## Current Limitations
 
 1. Domain-specific tools (`marketplace.rs`, `restaurant.rs`, etc.) are stubs
-2. Integration tests need testcontainers for PostgreSQL
+2. Integration tests need testcontainers for PostgreSQL; Oracle integration tests require a live Oracle container
 3. MCP: no streaming support; stdio/HTTP/Unix transports all use request-response
 4. WIT bindgen: auto-extract tool schema from WASM is stubbed
 5. Built tools get empty capabilities; need UX for granting access
 6. No tool versioning or rollback
 7. Observability: only `log` and `noop` backends (no OpenTelemetry)
+8. Oracle backend uses a single `Arc<Mutex<Connection>>` — no connection pool; high concurrency will serialize on DB calls
+9. Oracle ADB (Autonomous Database) mode is implemented but untested end-to-end
