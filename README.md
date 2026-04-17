@@ -78,7 +78,7 @@ IronOraClaw is a fork of [IronClaw](https://github.com/nearai/ironclaw) that rep
 ## Quick Start
 
 <!-- one-command-install -->
-> **One-command install** — clone, configure, and run in a single step:
+> **One-command install**: clone, configure, and run in a single step:
 >
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/jasperan/ironoraclaw/main/install.sh | bash
