@@ -753,29 +753,24 @@ impl SignalChannel {
             // DM message - apply DM policy
             match self.config.dm_policy.as_str() {
                 "open" => {}
-                "pairing" => {
+                "pairing" if !self.is_sender_allowed_with_pairing(&sender) => {
                     // Pairing policy: check allow_from + pairing store
-                    if !self.is_sender_allowed_with_pairing(&sender) {
-                        // Handle pairing request - this will create a request and send reply if new
-                        match self.handle_pairing_request(&sender, envelope.source_name.as_deref())
-                        {
-                            Ok(_) => {
-                                // Pairing request processed (new or existing), drop the message
-                                return None;
-                            }
-                            Err(()) => {
-                                // Error processing pairing, drop message
-                                return None;
-                            }
+                    // Handle pairing request - this will create a request and send reply if new
+                    match self.handle_pairing_request(&sender, envelope.source_name.as_deref()) {
+                        Ok(_) => {
+                            // Pairing request processed (new or existing), drop the message
+                            return None;
+                        }
+                        Err(()) => {
+                            // Error processing pairing, drop message
+                            return None;
                         }
                     }
                 }
-                "allowlist" => {
+                "allowlist" if !self.is_sender_allowed(&sender) => {
                     // Default: check allow_from list
-                    if !self.is_sender_allowed(&sender) {
-                        tracing::debug!(sender = %sender, "Signal: sender not in allow_from, dropping");
-                        return None;
-                    }
+                    tracing::debug!(sender = %sender, "Signal: sender not in allow_from, dropping");
+                    return None;
                 }
                 _ => {}
             }

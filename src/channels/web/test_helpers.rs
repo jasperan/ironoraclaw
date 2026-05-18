@@ -23,6 +23,7 @@ use crate::channels::web::ws::WsConnectionTracker;
 pub struct TestGatewayBuilder {
     msg_tx: Option<mpsc::Sender<IncomingMessage>>,
     llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
+    embeddings: Option<Arc<dyn crate::workspace::EmbeddingProvider>>,
     user_id: String,
 }
 
@@ -31,6 +32,7 @@ impl Default for TestGatewayBuilder {
         Self {
             msg_tx: None,
             llm_provider: None,
+            embeddings: None,
             user_id: "test-user".to_string(),
         }
     }
@@ -52,6 +54,12 @@ impl TestGatewayBuilder {
     /// Set the LLM provider (needed for OpenAI-compatible API tests).
     pub fn llm_provider(mut self, provider: Arc<dyn crate::llm::LlmProvider>) -> Self {
         self.llm_provider = Some(provider);
+        self
+    }
+
+    /// Set the embedding provider (needed for OpenAI-compatible embeddings API tests).
+    pub fn embeddings(mut self, provider: Arc<dyn crate::workspace::EmbeddingProvider>) -> Self {
+        self.embeddings = Some(provider);
         self
     }
 
@@ -81,6 +89,7 @@ impl TestGatewayBuilder {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
             llm_provider: self.llm_provider,
+            embeddings: self.embeddings,
             skill_registry: None,
             skill_catalog: None,
             scheduler: None,

@@ -1271,10 +1271,12 @@ impl ExtensionManager {
 
         // If we have a registry entry, use it (prefer kind_hint to resolve collisions)
         let mut result = if let Some(entry) = self.registry.get_with_kind(name, kind_hint).await {
-            self.install_from_entry(&entry, user_id).await.map_err(|e| {
-                tracing::error!(extension = %name, error = %e, "Extension install failed");
-                e
-            })?
+            self.install_from_entry(&entry, user_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!(extension = %name, error = %e, "Extension install failed");
+                    e
+                })?
         } else if let Some(url) = url {
             // If a URL was provided, determine kind and install
             let kind = kind_hint.unwrap_or_else(|| infer_kind_from_url(url));

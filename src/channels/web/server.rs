@@ -355,6 +355,8 @@ pub struct GatewayState {
     pub ws_tracker: Option<Arc<crate::channels::web::ws::WsConnectionTracker>>,
     /// LLM provider for OpenAI-compatible API proxy.
     pub llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
+    /// Embedding provider for OpenAI-compatible `/v1/embeddings`.
+    pub embeddings: Option<Arc<dyn crate::workspace::EmbeddingProvider>>,
     /// Skill registry for skill management API.
     pub skill_registry: Option<Arc<std::sync::RwLock<crate::skills::SkillRegistry>>>,
     /// Skill catalog for searching the ClawHub registry.
@@ -520,6 +522,10 @@ pub async fn start_server(
             post(super::openai_compat::chat_completions_handler),
         )
         .route("/v1/models", get(super::openai_compat::models_handler))
+        .route(
+            "/v1/embeddings",
+            post(super::openai_compat::embeddings_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),
             auth_middleware,
@@ -1881,7 +1887,7 @@ async fn chat_threads_handler(
 
     // Fallback: in-memory only (no assistant thread without DB)
     let mut sorted_threads: Vec<_> = sess.threads.values().collect();
-    sorted_threads.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sorted_threads.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
     let threads: Vec<ThreadInfo> = sorted_threads
         .into_iter()
         .map(|t| ThreadInfo {
@@ -3036,6 +3042,7 @@ mod tests {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: None,
             llm_provider: None,
+            embeddings: None,
             skill_registry: None,
             skill_catalog: None,
             scheduler: None,

@@ -265,7 +265,7 @@ impl SandboxStore for OracleBackend {
             if count > 0 {
                 tracing::info!("Marked {} stale sandbox jobs as interrupted", count);
             }
-            Ok::<_, DatabaseError>(count as u64)
+            Ok::<_, DatabaseError>(count)
         })
         .await
         .map_err(|e| DatabaseError::Query(format!("Spawn error: {e}")))?

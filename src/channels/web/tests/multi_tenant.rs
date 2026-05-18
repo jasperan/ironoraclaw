@@ -71,6 +71,7 @@ fn build_state(
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: None,
         llm_provider: None,
+        embeddings: None,
         skill_registry: None,
         skill_catalog: None,
         scheduler: None,

@@ -548,6 +548,7 @@ fn gateway_state_has_multi_tenant_fields() {
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
         llm_provider: None,
+        embeddings: None,
         skill_registry: None,
         skill_catalog: None,
         chat_rate_limiter: PerUserRateLimiter::new(30, 60), // Multi-tenant: per-user
@@ -622,6 +623,7 @@ async fn start_owner_scoped_sender_server() -> (
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
         llm_provider: None,
+        embeddings: None,
         skill_registry: None,
         skill_catalog: None,
         chat_rate_limiter: PerUserRateLimiter::new(30, 60),
@@ -1007,6 +1009,7 @@ async fn start_multi_user_server_with_db() -> (
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
         llm_provider: None,
+        embeddings: None,
         skill_registry: None,
         skill_catalog: None,
         chat_rate_limiter: PerUserRateLimiter::new(30, 60),

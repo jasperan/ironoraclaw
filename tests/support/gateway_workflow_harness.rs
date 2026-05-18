@@ -231,6 +231,7 @@ impl GatewayWorkflowHarness {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
             llm_provider: Some(Arc::clone(&components.llm)),
+            embeddings: components.embeddings.clone(),
             skill_registry: components.skill_registry.clone(),
             skill_catalog: components.skill_catalog.clone(),
             chat_rate_limiter: PerUserRateLimiter::new(120, 60),

@@ -14,7 +14,7 @@ Browser-facing HTTP API and SSE/WebSocket real-time streaming. Axum-based, singl
 | `auth.rs` | Bearer token middleware (`Authorization: Bearer <GATEWAY_AUTH_TOKEN>`) |
 | `log_layer.rs` | Tracing layer that tees log lines to the `/api/logs/events` SSE stream |
 | `handlers/` | Handler functions split by domain: `chat`, `extensions`, `jobs`, `memory`, `routines`, `settings`, `skills`, `static_files` |
-| `openai_compat.rs` | OpenAI-compatible proxy (`/v1/chat/completions`, `/v1/models`) |
+| `openai_compat.rs` | OpenAI-compatible proxy (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`) |
 | `util.rs` | Shared helpers (`build_turns_from_db_messages`, `truncate_preview`) |
 | `static/` | Single-page app (HTML/CSS/JS) — embedded at compile time via `include_str!`/`include_bytes!` |
 
@@ -111,6 +111,7 @@ Browser-facing HTTP API and SSE/WebSocket real-time streaming. Axum-based, singl
 | GET | `/api/gateway/status` | Server uptime, connected clients, config |
 | POST | `/v1/chat/completions` | OpenAI-compatible LLM proxy |
 | GET | `/v1/models` | OpenAI-compatible model list |
+| POST | `/v1/embeddings` | OpenAI-compatible embedding proxy |
 
 ### Static / Project files
 | Method | Path | Description |
@@ -172,6 +173,7 @@ Key fields:
 - `msg_tx` — `RwLock<Option<mpsc::Sender<IncomingMessage>>>` — sends messages to the agent loop; set when `start()` is called on the `Channel`.
 - `sse` — `SseManager` — broadcast hub; call `state.sse.broadcast(event)` from any handler.
 - `ws_tracker` — `Option<Arc<WsConnectionTracker>>` — tracks WS connection count separately from SSE.
+- `embeddings` — `Option<Arc<dyn EmbeddingProvider>>` — exposes the configured embedding provider to the OpenAI-compatible `/v1/embeddings` endpoint.
 - `chat_rate_limiter` — `RateLimiter` — 30 req/60 s sliding window shared across all chat send callers.
 - `scheduler` — `Option<SchedulerSlot>` — used to inject follow-up messages into running agent jobs.
 - `cost_guard` — `Option<Arc<CostGuard>>` — exposes token usage / cost totals in the status endpoint.

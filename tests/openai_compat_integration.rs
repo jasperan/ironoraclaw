@@ -17,6 +17,7 @@ use ironclaw::llm::{
     CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
     ToolCompletionResponse,
 };
+use ironclaw::workspace::{EmbeddingProvider, MockEmbeddings};
 
 const AUTH_TOKEN: &str = "test-openai-token";
 
@@ -190,6 +191,13 @@ async fn start_test_server() -> (SocketAddr, Arc<GatewayState>, Arc<MockLlmState
 async fn start_test_server_with_provider(
     llm_provider: Arc<dyn LlmProvider>,
 ) -> (SocketAddr, Arc<GatewayState>) {
+    start_test_server_with_providers(llm_provider, None).await
+}
+
+async fn start_test_server_with_providers(
+    llm_provider: Arc<dyn LlmProvider>,
+    embeddings: Option<Arc<dyn EmbeddingProvider>>,
+) -> (SocketAddr, Arc<GatewayState>) {
     let state = Arc::new(GatewayState {
         msg_tx: tokio::sync::RwLock::new(None),
         sse: Arc::new(SseManager::new()),
@@ -209,6 +217,7 @@ async fn start_test_server_with_provider(
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
         llm_provider: Some(llm_provider),
+        embeddings,
         skill_registry: None,
         skill_catalog: None,
         chat_rate_limiter: ironclaw::channels::web::server::PerUserRateLimiter::new(30, 60),
@@ -678,6 +687,38 @@ async fn test_models_endpoint() {
 }
 
 #[tokio::test]
+async fn test_openai_compat_embeddings_endpoint() {
+    let mock_state = Arc::new(MockLlmState::default());
+    let llm_provider: Arc<dyn LlmProvider> = Arc::new(MockLlmProvider::new(mock_state));
+    let embeddings: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddings::new(4));
+    let (addr, _state) = start_test_server_with_providers(llm_provider, Some(embeddings)).await;
+    let url = format!("http://{}/v1/embeddings", addr);
+
+    let resp = client()
+        .post(&url)
+        .bearer_auth(AUTH_TOKEN)
+        .json(&serde_json::json!({
+            "model": "mock-embedding",
+            "input": ["hello", "world"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["object"], "list");
+    assert_eq!(body["model"], "mock-embedding");
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0]["object"], "embedding");
+    assert_eq!(data[0]["index"], 0);
+    assert_eq!(data[0]["embedding"].as_array().unwrap().len(), 4);
+    assert_eq!(body["usage"]["prompt_tokens"], 4);
+    assert_eq!(body["usage"]["total_tokens"], 4);
+}
+
+#[tokio::test]
 async fn test_models_no_auth() {
     let (addr, _state, _mock_state) = start_test_server().await;
     let url = format!("http://{}/v1/models", addr);
@@ -708,6 +749,7 @@ async fn test_no_llm_provider_returns_503() {
         shutdown_tx: tokio::sync::RwLock::new(None),
         ws_tracker: Some(Arc::new(WsConnectionTracker::new())),
         llm_provider: None, // No LLM!
+        embeddings: None,
         skill_registry: None,
         skill_catalog: None,
         chat_rate_limiter: ironclaw::channels::web::server::PerUserRateLimiter::new(30, 60),

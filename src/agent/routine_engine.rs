@@ -806,7 +806,6 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-
         };
 
         tokio::spawn(async move {
@@ -891,7 +890,6 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-
         };
 
         tokio::spawn(async move {
@@ -945,7 +943,6 @@ impl RoutineEngine {
             extension_manager: self.extension_manager.clone(),
             tools: self.tools.clone(),
             safety: self.safety.clone(),
-
         };
 
         // Record the run in DB, then spawn execution

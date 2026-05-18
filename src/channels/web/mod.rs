@@ -103,6 +103,7 @@ impl GatewayChannel {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: Some(Arc::new(ws::WsConnectionTracker::new())),
             llm_provider: None,
+            embeddings: None,
             skill_registry: None,
             skill_catalog: None,
             chat_rate_limiter: server::PerUserRateLimiter::new(30, 60),
@@ -159,6 +160,7 @@ impl GatewayChannel {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: Some(Arc::new(ws::WsConnectionTracker::new())),
             llm_provider: None,
+            embeddings: None,
             skill_registry: None,
             skill_catalog: None,
             chat_rate_limiter: server::PerUserRateLimiter::new(30, 60),
@@ -200,6 +202,7 @@ impl GatewayChannel {
             shutdown_tx: tokio::sync::RwLock::new(None),
             ws_tracker: self.state.ws_tracker.clone(),
             llm_provider: self.state.llm_provider.clone(),
+            embeddings: self.state.embeddings.clone(),
             skill_registry: self.state.skill_registry.clone(),
             skill_catalog: self.state.skill_catalog.clone(),
             chat_rate_limiter: server::PerUserRateLimiter::new(30, 60),
@@ -300,6 +303,15 @@ impl GatewayChannel {
     /// Inject the LLM provider for OpenAI-compatible API proxy.
     pub fn with_llm_provider(mut self, llm: Arc<dyn crate::llm::LlmProvider>) -> Self {
         self.rebuild_state(|s| s.llm_provider = Some(llm));
+        self
+    }
+
+    /// Inject the embedding provider for OpenAI-compatible API proxy.
+    pub fn with_embedding_provider(
+        mut self,
+        embeddings: Arc<dyn crate::workspace::EmbeddingProvider>,
+    ) -> Self {
+        self.rebuild_state(|s| s.embeddings = Some(embeddings));
         self
     }
 

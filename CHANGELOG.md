@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Expose the configured embedding provider through the web gateway's OpenAI-compatible `/v1/embeddings` endpoint.
+
 ## [0.23.0](https://github.com/nearai/ironclaw/compare/ironclaw-v0.22.0...ironclaw-v0.23.0) - 2026-03-27
 
 ### Added

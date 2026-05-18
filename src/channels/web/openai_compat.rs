@@ -1,4 +1,4 @@
-//! OpenAI-compatible HTTP API (`/v1/chat/completions`, `/v1/models`).
+//! OpenAI-compatible HTTP API (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`).
 //!
 //! This module provides a direct LLM proxy through the web gateway so any
 //! standard OpenAI client library can use IronClaw as a backend by simply
@@ -15,12 +15,14 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
     },
 };
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::{
     ChatMessage, CompletionRequest, FinishReason, Role, ToolCall, ToolCompletionRequest,
     ToolDefinition,
 };
+use crate::workspace::EmbeddingError;
 
 use super::server::GatewayState;
 
@@ -46,6 +48,34 @@ pub struct OpenAiChatRequest {
     pub tool_choice: Option<serde_json::Value>,
     #[serde(default)]
     pub stop: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAiEmbeddingsRequest {
+    pub model: String,
+    pub input: OpenAiEmbeddingInput,
+    #[serde(default)]
+    pub encoding_format: Option<String>,
+    #[serde(default)]
+    pub dimensions: Option<usize>,
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum OpenAiEmbeddingInput {
+    String(String),
+    StringArray(Vec<String>),
+}
+
+impl OpenAiEmbeddingInput {
+    fn into_texts(self) -> Vec<String> {
+        match self {
+            Self::String(text) => vec![text],
+            Self::StringArray(texts) => texts,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +146,34 @@ pub struct OpenAiChoice {
 pub struct OpenAiUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAiEmbeddingsResponse {
+    pub object: &'static str,
+    pub data: Vec<OpenAiEmbeddingObject>,
+    pub model: String,
+    pub usage: OpenAiEmbeddingsUsage,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAiEmbeddingObject {
+    pub object: &'static str,
+    pub embedding: OpenAiEmbeddingVector,
+    pub index: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum OpenAiEmbeddingVector {
+    Float(Vec<f32>),
+    Base64(String),
+}
+
+#[derive(Debug, Serialize)]
+pub struct OpenAiEmbeddingsUsage {
+    pub prompt_tokens: u32,
     pub total_tokens: u32,
 }
 
@@ -373,6 +431,43 @@ fn openai_error(
     )
 }
 
+fn map_embedding_error(err: EmbeddingError) -> (StatusCode, Json<OpenAiErrorResponse>) {
+    let (status, error_type, code) = match &err {
+        EmbeddingError::AuthFailed => (
+            StatusCode::UNAUTHORIZED,
+            "authentication_error",
+            "auth_error",
+        ),
+        EmbeddingError::RateLimited { .. } => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_error",
+            "rate_limit",
+        ),
+        EmbeddingError::TextTooLong { .. } => (
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "context_length_exceeded",
+        ),
+        EmbeddingError::InvalidResponse(_) | EmbeddingError::HttpError(_) => (
+            StatusCode::BAD_GATEWAY,
+            "server_error",
+            "embedding_provider_error",
+        ),
+    };
+
+    (
+        status,
+        Json(OpenAiErrorResponse {
+            error: OpenAiErrorDetail {
+                message: err.to_string(),
+                error_type: error_type.to_string(),
+                param: None,
+                code: Some(code.to_string()),
+            },
+        }),
+    )
+}
+
 fn chat_completion_id() -> String {
     format!("chatcmpl-{}", uuid::Uuid::new_v4().simple())
 }
@@ -403,6 +498,22 @@ fn validate_model_name(model: &str) -> Result<(), String> {
         return Err("model contains control characters".to_string());
     }
     Ok(())
+}
+
+fn estimate_embedding_tokens(texts: &[String]) -> u32 {
+    let total = texts
+        .iter()
+        .map(|text| text.chars().count().div_ceil(4))
+        .sum::<usize>();
+    total.min(u32::MAX as usize) as u32
+}
+
+fn encode_embedding_base64(embedding: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(std::mem::size_of_val(embedding));
+    for value in embedding {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Extract stop sequences from the flexible `stop` field.
@@ -816,7 +927,7 @@ pub async fn models_handler(
     let created = unix_timestamp();
 
     // Try to fetch available models from the provider
-    let models = match llm.list_models().await {
+    let mut models: Vec<serde_json::Value> = match llm.list_models().await {
         Ok(names) if !names.is_empty() => names
             .into_iter()
             .map(|name| {
@@ -840,10 +951,161 @@ pub async fn models_handler(
         Err(e) => return Err(map_llm_error(e)),
     };
 
+    if let Some(embeddings) = state.embeddings.as_ref() {
+        let embedding_model = embeddings.model_name();
+        let already_listed = models
+            .iter()
+            .any(|model| model.get("id").and_then(|id| id.as_str()) == Some(embedding_model));
+        if !already_listed {
+            models.push(serde_json::json!({
+                "id": embedding_model,
+                "object": "model",
+                "created": created,
+                "owned_by": "ironclaw"
+            }));
+        }
+    }
+
     Ok(Json(serde_json::json!({
         "object": "list",
         "data": models
     })))
+}
+
+pub async fn embeddings_handler(
+    State(state): State<Arc<GatewayState>>,
+    super::auth::AuthenticatedUser(user): super::auth::AuthenticatedUser,
+    Json(req): Json<OpenAiEmbeddingsRequest>,
+) -> Result<Json<OpenAiEmbeddingsResponse>, (StatusCode, Json<OpenAiErrorResponse>)> {
+    if !state.chat_rate_limiter.check(&user.user_id) {
+        return Err(openai_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded. Please try again later.",
+            "rate_limit_error",
+        ));
+    }
+
+    let embeddings = state.embeddings.as_ref().ok_or_else(|| {
+        openai_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Embedding provider not configured",
+            "server_error",
+        )
+    })?;
+
+    if let Err(e) = validate_model_name(&req.model) {
+        return Err(openai_error(
+            StatusCode::BAD_REQUEST,
+            e,
+            "invalid_request_error",
+        ));
+    }
+
+    let active_model = embeddings.model_name();
+    if req.model != active_model {
+        return Err(openai_error(
+            StatusCode::NOT_FOUND,
+            format!(
+                "embedding model '{}' is not configured; active embedding model is '{}'",
+                req.model, active_model
+            ),
+            "invalid_request_error",
+        ));
+    }
+
+    if let Some(dimensions) = req.dimensions
+        && dimensions != embeddings.dimension()
+    {
+        return Err(openai_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "dimensions={} is not supported by the active embedding model; expected {}",
+                dimensions,
+                embeddings.dimension()
+            ),
+            "invalid_request_error",
+        ));
+    }
+
+    let encoding_format = req.encoding_format.as_deref().unwrap_or("float");
+    if !matches!(encoding_format, "float" | "base64") {
+        return Err(openai_error(
+            StatusCode::BAD_REQUEST,
+            "encoding_format must be 'float' or 'base64'",
+            "invalid_request_error",
+        ));
+    }
+
+    let texts = req.input.into_texts();
+    if texts.is_empty() {
+        return Err(openai_error(
+            StatusCode::BAD_REQUEST,
+            "input must not be empty",
+            "invalid_request_error",
+        ));
+    }
+    if let Some((index, text)) = texts
+        .iter()
+        .enumerate()
+        .find(|(_, text)| text.len() > embeddings.max_input_length())
+    {
+        return Err(openai_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "input[{}] is too long: {} > {} characters",
+                index,
+                text.len(),
+                embeddings.max_input_length()
+            ),
+            "invalid_request_error",
+        ));
+    }
+
+    let prompt_tokens = estimate_embedding_tokens(&texts);
+    let vectors = embeddings
+        .embed_batch(&texts)
+        .await
+        .map_err(map_embedding_error)?;
+
+    if vectors.len() != texts.len() {
+        return Err(openai_error(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "embedding provider returned {} embeddings for {} inputs",
+                vectors.len(),
+                texts.len()
+            ),
+            "server_error",
+        ));
+    }
+
+    let data = vectors
+        .into_iter()
+        .enumerate()
+        .map(|(index, embedding)| {
+            let embedding = if encoding_format == "base64" {
+                OpenAiEmbeddingVector::Base64(encode_embedding_base64(&embedding))
+            } else {
+                OpenAiEmbeddingVector::Float(embedding)
+            };
+
+            OpenAiEmbeddingObject {
+                object: "embedding",
+                embedding,
+                index,
+            }
+        })
+        .collect();
+
+    Ok(Json(OpenAiEmbeddingsResponse {
+        object: "list",
+        data,
+        model: active_model.to_string(),
+        usage: OpenAiEmbeddingsUsage {
+            prompt_tokens,
+            total_tokens: prompt_tokens,
+        },
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -853,6 +1115,45 @@ pub async fn models_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channels::web::auth::{AuthenticatedUser, UserIdentity};
+    use crate::channels::web::server::{ActiveConfigSnapshot, PerUserRateLimiter, RateLimiter};
+    use crate::channels::web::sse::SseManager;
+    use crate::workspace::MockEmbeddings;
+    use std::sync::Arc;
+
+    fn test_gateway_state_with_embeddings() -> Arc<GatewayState> {
+        Arc::new(GatewayState {
+            msg_tx: tokio::sync::RwLock::new(None),
+            sse: Arc::new(SseManager::new()),
+            workspace: None,
+            workspace_pool: None,
+            session_manager: None,
+            log_broadcaster: None,
+            log_level_handle: None,
+            extension_manager: None,
+            tool_registry: None,
+            store: None,
+            job_manager: None,
+            prompt_queue: None,
+            owner_id: "test".to_string(),
+            default_sender_id: "test".to_string(),
+            shutdown_tx: tokio::sync::RwLock::new(None),
+            ws_tracker: None,
+            llm_provider: None,
+            embeddings: Some(Arc::new(MockEmbeddings::new(4))),
+            skill_registry: None,
+            skill_catalog: None,
+            scheduler: None,
+            chat_rate_limiter: PerUserRateLimiter::new(30, 60),
+            oauth_rate_limiter: RateLimiter::new(10, 60),
+            webhook_rate_limiter: RateLimiter::new(10, 60),
+            registry_entries: vec![],
+            cost_guard: None,
+            routine_engine: Arc::new(tokio::sync::RwLock::new(None)),
+            startup_time: std::time::Instant::now(),
+            active_config: ActiveConfigSnapshot::default(),
+        })
+    }
 
     #[test]
     fn test_parse_role() {
@@ -1117,5 +1418,64 @@ mod tests {
     #[test]
     fn test_validate_model_name_accepts_normal_name() {
         assert!(validate_model_name("gpt-4").is_ok());
+    }
+
+    #[test]
+    fn test_embedding_input_deserializes_string_and_array() {
+        let single: OpenAiEmbeddingsRequest = serde_json::from_value(serde_json::json!({
+            "model": "mock-embedding",
+            "input": "hello"
+        }))
+        .unwrap();
+        assert_eq!(single.input.into_texts(), vec!["hello".to_string()]);
+
+        let batch: OpenAiEmbeddingsRequest = serde_json::from_value(serde_json::json!({
+            "model": "mock-embedding",
+            "input": ["hello", "world"]
+        }))
+        .unwrap();
+        assert_eq!(
+            batch.input.into_texts(),
+            vec!["hello".to_string(), "world".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_encode_embedding_base64_uses_f32_little_endian() {
+        assert_eq!(encode_embedding_base64(&[1.0]), "AACAPw==");
+    }
+
+    #[tokio::test]
+    async fn test_embeddings_handler_float_response() {
+        let req = OpenAiEmbeddingsRequest {
+            model: "mock-embedding".to_string(),
+            input: OpenAiEmbeddingInput::StringArray(vec![
+                "hello".to_string(),
+                "world".to_string(),
+            ]),
+            encoding_format: None,
+            dimensions: Some(4),
+            user: None,
+        };
+        let user = AuthenticatedUser(UserIdentity {
+            user_id: "test".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let Json(resp) =
+            embeddings_handler(State(test_gateway_state_with_embeddings()), user, Json(req))
+                .await
+                .unwrap();
+
+        assert_eq!(resp.object, "list");
+        assert_eq!(resp.model, "mock-embedding");
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].index, 0);
+        match &resp.data[0].embedding {
+            OpenAiEmbeddingVector::Float(values) => assert_eq!(values.len(), 4),
+            OpenAiEmbeddingVector::Base64(_) => panic!("expected float embedding"),
+        }
+        assert_eq!(resp.usage.prompt_tokens, 4);
+        assert_eq!(resp.usage.total_tokens, 4);
     }
 }
