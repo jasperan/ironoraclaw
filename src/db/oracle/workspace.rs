@@ -3,46 +3,17 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use uuid::Uuid;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_opt_ts_str, parse_ts, vec_literal};
 use crate::db::WorkspaceStore;
 use crate::error::WorkspaceError;
 use crate::workspace::{
     MemoryChunk, MemoryDocument, RankedResult, SearchConfig, SearchResult, WorkspaceEntry,
     reciprocal_rank_fusion,
 };
-
-/// Parse an ISO-8601 / Oracle TIMESTAMP string into DateTime<Utc>.
-fn parse_ts(s: &str) -> DateTime<Utc> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    DateTime::UNIX_EPOCH
-}
-
-fn parse_opt_ts(s: &str) -> Option<DateTime<Utc>> {
-    if s.is_empty() {
-        return None;
-    }
-    let ts = parse_ts(s);
-    if ts == DateTime::UNIX_EPOCH {
-        None
-    } else {
-        Some(ts)
-    }
-}
-
-fn fmt_ts(dt: &DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
 
 /// Convert an Oracle row to MemoryDocument.
 /// Expected column order: id, user_id, agent_id, path, content, created_at, updated_at, metadata
@@ -96,31 +67,28 @@ impl WorkspaceStore for OracleBackend {
             })?;
 
             // Build query based on whether agent_id is Some or None
-            let (sql, result) = if let Some(ref aid) = agent_id_str {
+            let result = if let Some(ref aid) = agent_id_str {
                 let sql = format!(
                     "SELECT {} FROM IRON_MEMORIES WHERE user_id = :1 AND agent_id = :2 AND path = :3",
                     DOC_COLUMNS
                 );
-                let rows = conn.query(&sql, &[&user_id, aid, &path]).map_err(|e| {
+                conn.query(&sql, &[&user_id, aid, &path]).map_err(|e| {
                     WorkspaceError::SearchFailed {
                         reason: format!("Query failed: {e}"),
                     }
-                })?;
-                (sql, rows)
+                })?
             } else {
                 let sql = format!(
                     "SELECT {} FROM IRON_MEMORIES WHERE user_id = :1 AND agent_id IS NULL AND path = :2",
                     DOC_COLUMNS
                 );
-                let rows = conn.query(&sql, &[&user_id, &path]).map_err(|e| {
+                conn.query(&sql, &[&user_id, &path]).map_err(|e| {
                     WorkspaceError::SearchFailed {
                         reason: format!("Query failed: {e}"),
                     }
-                })?;
-                (sql, rows)
+                })?
             };
 
-            let _ = sql; // suppress unused warning
             if let Some(row_result) = result.into_iter().next() {
                 let row = row_result.map_err(|e| WorkspaceError::SearchFailed {
                     reason: format!("Row error: {e}"),
@@ -372,7 +340,7 @@ impl WorkspaceStore for OracleBackend {
                 let updated_at_str: Option<String> = row.get(1).unwrap_or(None);
                 let content_preview: Option<String> = row.get(2).unwrap_or(None);
 
-                let updated_at = updated_at_str.and_then(|s| parse_opt_ts(&s));
+                let updated_at = updated_at_str.and_then(|s| parse_opt_ts_str(&s));
 
                 let relative = if dir.is_empty() {
                     full_path.as_str()
@@ -570,15 +538,7 @@ impl WorkspaceStore for OracleBackend {
         let doc_id = document_id.to_string();
         let chunk_index = chunk_index as i64;
         let content = content.to_string();
-        let embedding_str = embedding.map(|e| {
-            format!(
-                "[{}]",
-                e.iter()
-                    .map(|f| f.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
-        });
+        let embedding_str = embedding.map(vec_literal);
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
@@ -624,14 +584,7 @@ impl WorkspaceStore for OracleBackend {
     ) -> Result<(), WorkspaceError> {
         let conn_mgr = self.conn_mgr.clone();
         let chunk_id_str = chunk_id.to_string();
-        let embedding_str = format!(
-            "[{}]",
-            embedding
-                .iter()
-                .map(|f| f.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        let embedding_str = vec_literal(embedding);
 
         tokio::task::spawn_blocking(move || {
             let conn = conn_mgr.conn();
@@ -825,13 +778,7 @@ impl WorkspaceStore for OracleBackend {
             // --- Vector results via VECTOR_DISTANCE with COSINE ---
             let vector_results = if use_vector {
                 if let Some(ref emb) = embedding_vec {
-                    let vector_str = format!(
-                        "[{}]",
-                        emb.iter()
-                            .map(|f| f.to_string())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    );
+                    let vector_str = vec_literal(emb);
 
                     let rows = if let Some(ref aid) = agent_id_str {
                         conn.query(

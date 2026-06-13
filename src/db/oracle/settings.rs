@@ -3,30 +3,13 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_ts};
 use crate::db::SettingsStore;
 use crate::error::DatabaseError;
 use crate::history::SettingRow;
-
-/// Parse an ISO-8601 / Oracle TIMESTAMP string into DateTime<Utc>.
-fn parse_ts(s: &str) -> DateTime<Utc> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    DateTime::UNIX_EPOCH
-}
-
-fn fmt_ts(dt: &DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
 
 #[async_trait]
 impl SettingsStore for OracleBackend {

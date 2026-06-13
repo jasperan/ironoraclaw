@@ -276,6 +276,7 @@ ironoraclaw
         sandbox.rs         # WASM sandbox job tracking
         settings.rs        # User settings K-V store
         tool_failures.rs   # Self-repair failure tracking
+        time.rs            # Shared timestamp + vector-literal helpers
         mod.rs             # Module exports
     agent/                 # Agent runtime loop
     cli/                   # CLI commands (setup-oracle, oracle-inspect)

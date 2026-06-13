@@ -5,30 +5,10 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_opt_ts, parse_ts};
 use crate::db::SandboxStore;
 use crate::error::DatabaseError;
 use crate::history::{JobEventRecord, SandboxJobRecord, SandboxJobSummary};
-
-fn fmt_ts(dt: &DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-fn parse_ts(s: &str) -> DateTime<Utc> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    DateTime::UNIX_EPOCH
-}
-
-fn parse_opt_ts(s: &Option<String>) -> Option<DateTime<Utc>> {
-    s.as_ref().map(|s| parse_ts(s))
-}
 
 /// Read a SandboxJobRecord from a row whose columns are:
 /// 0:id, 1:tool_name(task), 2:message(cred_json), 3:status, 4:user_id, 5:job_id(project_dir),
@@ -77,8 +57,8 @@ fn row_to_sandbox_job(row: &oracle::Row) -> Result<SandboxJobRecord, DatabaseErr
             .get(7)
             .map_err(|e| DatabaseError::Query(e.to_string()))?,
         created_at: parse_ts(&created_str),
-        started_at: parse_opt_ts(&started_str),
-        completed_at: parse_opt_ts(&completed_str),
+        started_at: parse_opt_ts(started_str.as_deref()),
+        completed_at: parse_opt_ts(completed_str.as_deref()),
     })
 }
 

@@ -6,6 +6,7 @@
 
 pub mod connection;
 pub mod schema;
+pub mod time;
 
 // Sub-trait implementations (one file per Database sub-trait).
 pub mod conversations;

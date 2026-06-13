@@ -5,30 +5,10 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_ts};
 use crate::db::ConversationStore;
 use crate::error::DatabaseError;
 use crate::history::{ConversationMessage, ConversationSummary};
-
-/// Parse an ISO-8601 / Oracle TIMESTAMP string into DateTime<Utc>.
-fn parse_ts(s: &str) -> DateTime<Utc> {
-    // Try RFC-3339 first, then common Oracle formats
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    // Oracle TIMESTAMP default format: DD-MON-RR HH.MI.SS.FF AM
-    // We won't encounter it if we always write ISO strings; fall back to epoch.
-    DateTime::UNIX_EPOCH
-}
-
-fn fmt_ts(dt: &DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
 
 #[async_trait]
 impl ConversationStore for OracleBackend {

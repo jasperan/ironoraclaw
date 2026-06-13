@@ -10,41 +10,12 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_opt_ts_str, parse_ts};
 use crate::agent::routine::{
     NotifyConfig, Routine, RoutineAction, RoutineGuardrails, RoutineRun, RunStatus, Trigger,
 };
 use crate::db::RoutineStore;
 use crate::error::DatabaseError;
-
-/// Parse an ISO-8601 / Oracle TIMESTAMP string into DateTime<Utc>.
-fn parse_ts(s: &str) -> DateTime<Utc> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    DateTime::UNIX_EPOCH
-}
-
-fn parse_opt_ts(s: &str) -> Option<DateTime<Utc>> {
-    if s.is_empty() {
-        return None;
-    }
-    let ts = parse_ts(s);
-    if ts == DateTime::UNIX_EPOCH {
-        None
-    } else {
-        Some(ts)
-    }
-}
-
-fn fmt_ts(dt: &DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
 
 /// Column list for IRON_ROUTINES (matches positional access in `row_to_routine`).
 const ROUTINE_COLUMNS: &str = "\
@@ -135,8 +106,8 @@ fn row_to_routine(row: &oracle::Row) -> Result<Routine, DatabaseError> {
         },
         state: serde_json::from_str(&state_str)
             .unwrap_or(serde_json::Value::Object(Default::default())),
-        last_run_at: last_run_at_str.and_then(|s| parse_opt_ts(&s)),
-        next_fire_at: next_fire_at_str.and_then(|s| parse_opt_ts(&s)),
+        last_run_at: last_run_at_str.and_then(|s| parse_opt_ts_str(&s)),
+        next_fire_at: next_fire_at_str.and_then(|s| parse_opt_ts_str(&s)),
         run_count: run_count as u64,
         consecutive_failures: consecutive_failures as u32,
         created_at: parse_ts(&created_at_str),
@@ -168,7 +139,7 @@ fn row_to_routine_run(row: &oracle::Row) -> Result<RoutineRun, DatabaseError> {
         trigger_type,
         trigger_detail,
         started_at: parse_ts(&started_at_str),
-        completed_at: completed_at_str.and_then(|s| parse_opt_ts(&s)),
+        completed_at: completed_at_str.and_then(|s| parse_opt_ts_str(&s)),
         status,
         result_summary,
         tokens_used: tokens_used.map(|v| v as i32),

@@ -6,31 +6,11 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use super::OracleBackend;
+use super::time::{fmt_ts, parse_opt_ts, parse_ts};
 use crate::context::{ActionRecord, JobContext, JobState};
 use crate::db::JobStore;
 use crate::error::DatabaseError;
 use crate::history::{AgentJobRecord, AgentJobSummary, LlmCallRecord};
-
-fn fmt_ts(dt: &chrono::DateTime<Utc>) -> String {
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-fn parse_ts(s: &str) -> chrono::DateTime<Utc> {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return dt.with_timezone(&Utc);
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
-        return ndt.and_utc();
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return ndt.and_utc();
-    }
-    chrono::DateTime::UNIX_EPOCH
-}
-
-fn parse_opt_ts(s: &Option<String>) -> Option<chrono::DateTime<Utc>> {
-    s.as_ref().map(|s| parse_ts(s))
-}
 
 fn parse_job_state(s: &str) -> JobState {
     match s {
@@ -76,8 +56,8 @@ fn row_to_agent_job(row: &oracle::Row) -> Result<AgentJobRecord, DatabaseError> 
             .get(4)
             .map_err(|e| DatabaseError::Query(e.to_string()))?,
         created_at: parse_ts(&created_at_str),
-        started_at: parse_opt_ts(&started_at_str),
-        completed_at: parse_opt_ts(&completed_at_str),
+        started_at: parse_opt_ts(started_at_str.as_deref()),
+        completed_at: parse_opt_ts(completed_at_str.as_deref()),
     })
 }
 
@@ -212,8 +192,8 @@ impl JobStore for OracleBackend {
                     max_tokens: 0,
                     repair_attempts: repair as u32,
                     created_at: parse_ts(&created_str),
-                    started_at: parse_opt_ts(&started_str),
-                    completed_at: parse_opt_ts(&completed_str),
+                    started_at: parse_opt_ts(started_str.as_deref()),
+                    completed_at: parse_opt_ts(completed_str.as_deref()),
                     transitions: Vec::new(),
                     metadata: serde_json::Value::Null,
                     extra_env: std::sync::Arc::new(std::collections::HashMap::new()),
