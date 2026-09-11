@@ -31,7 +31,7 @@ IronClaw operates across four trust boundaries:
 | Listener | Default Port | Default Bind | Auth Mechanism | Config Env Var | Source |
 |----------|-------------|-------------|----------------|----------------|--------|
 | Web Gateway | 3000 | `127.0.0.1` | Bearer token (constant-time) | `GATEWAY_HOST`, `GATEWAY_PORT`, `GATEWAY_AUTH_TOKEN` | `server.rs` — `start_server()` |
-| HTTP Webhook Server | 8080 | `0.0.0.0` | Shared secret (body field) | `HTTP_HOST`, `HTTP_PORT`, `HTTP_WEBHOOK_SECRET` | `webhook_server.rs` — `start()` |
+| HTTP Webhook Server | 8080 | `0.0.0.0` | **HMAC-SHA256 signature (`x-hub-signature-256`); secret required at startup** | `HTTP_HOST`, `HTTP_PORT`, `HTTP_WEBHOOK_SECRET` | `channels/http.rs` — `start()`/`verify_hmac_signature()`; `channels/webhook_server.rs` hosts the routes |
 | Orchestrator Internal API | 50051 | `127.0.0.1` (macOS/Win) / `0.0.0.0` (Linux) | Per-job bearer token (constant-time) | `ORCHESTRATOR_PORT` | `api.rs` — `OrchestratorApi::start()` |
 | OAuth Callback Listener | 9876 | `127.0.0.1` | None (ephemeral, 5-min timeout) | N/A (hardcoded) | `oauth_defaults.rs` — `bind_callback_listener()` |
 | Sandbox HTTP Proxy | OS-assigned (ephemeral) | `127.0.0.1` | None (loopback only) | N/A (auto-assigned) | `proxy/http.rs` — `SandboxProxy::start()` |
