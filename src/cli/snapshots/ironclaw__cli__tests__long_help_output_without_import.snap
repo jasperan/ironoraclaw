@@ -2,12 +2,12 @@
 source: src/cli/mod.rs
 expression: help
 ---
-IronClaw is a secure AI assistant. Use 'ironclaw <subcommand> --help' for details.
+IronOraClaw is a secure AI assistant backed by Oracle AI Database. Use 'ironoraclaw <subcommand> --help' for details.
 Examples:
-  ironclaw run  # Start the agent
-  ironclaw config list  # List configs
+  ironoraclaw run  # Start the agent
+  ironoraclaw config list  # List configs
 
-Usage: ironclaw [OPTIONS] [COMMAND]
+Usage: ironoraclaw [OPTIONS] [COMMAND]
 
 Commands:
   run         Run the AI agent
