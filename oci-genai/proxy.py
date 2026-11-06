@@ -20,6 +20,7 @@ Then configure IronOraClaw with:
     LLM_MODEL=meta.llama-3.3-70b-instruct
 """
 
+import hmac
 import json
 import os
 import sys
@@ -35,6 +36,10 @@ PROXY_HOST = os.getenv("OCI_PROXY_HOST", "127.0.0.1")
 # Cross-origin access is opt-in. Unset means no Access-Control-Allow-Origin is sent, so a web page
 # the user visits cannot read model responses from this proxy.
 PROXY_ALLOW_ORIGIN = os.getenv("OCI_PROXY_ALLOW_ORIGIN", "")
+# Optional shared secret. When set, every request must carry `Authorization: Bearer <token>`
+# (set LLM_API_KEY to the same value). Set it whenever other local accounts share this host or
+# OCI_PROXY_HOST is not loopback; loopback alone does not separate local principals.
+PROXY_TOKEN = os.getenv("OCI_PROXY_TOKEN", "")
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -61,8 +66,24 @@ class OCIProxyHandler(BaseHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
 
+    # ── Authorization ───────────────────────────────────────────
+    def _authorized(self):
+        # Browsers always attach Origin to cross-site POSTs (even CORS "simple" requests that skip
+        # preflight), so a request from a web page is refused unless that origin was opted in.
+        origin = self.headers.get("Origin")
+        if origin is not None and (not PROXY_ALLOW_ORIGIN or origin != PROXY_ALLOW_ORIGIN):
+            return False
+        if PROXY_TOKEN:
+            header = self.headers.get("Authorization", "")
+            if not header.startswith("Bearer "):
+                return False
+            return hmac.compare_digest(header[7:].encode(), PROXY_TOKEN.encode())
+        return True
+
     # ── POST /v1/chat/completions ───────────────────────────────
     def do_POST(self):
+        if not self._authorized():
+            return self._json(403, {"error": {"message": "Forbidden"}})
         if "/chat/completions" not in self.path:
             return self._json(404, {"error": {"message": "Not found"}})
 

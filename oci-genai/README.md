@@ -47,6 +47,8 @@ The default LLM backend (Ollama) remains unchanged. This integration is entirely
 | `OCI_REGION` | OCI region for GenAI endpoint | `us-chicago-1` |
 | `OCI_COMPARTMENT_ID` | OCI compartment OCID (required) | -- |
 | `OCI_PROXY_PORT` | Local proxy listen port | `9999` |
+| `OCI_PROXY_TOKEN` | If set, requests must send `Authorization: Bearer <token>` (use as `LLM_API_KEY`); set on shared hosts | unset |
+| `OCI_PROXY_ALLOW_ORIGIN` | Browser origin allowed to call the proxy; requests with any other `Origin` get 403 | unset |
 
 ## Available OCI GenAI Models
 
